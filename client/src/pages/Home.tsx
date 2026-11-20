@@ -59,6 +59,12 @@ const parseBrlInput = (raw: string) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const formatTime = (seconds: number) => {
+  const mins = Math.floor(seconds / 60).toString().padStart(2, "0");
+  const secs = (seconds % 60).toString().padStart(2, "0");
+  return `${mins}:${secs}`;
+};
+
 const navGroups: { label: string; items: { id: ViewKey; label: string; icon: LucideIcon; badge?: string }[] }[] = [
   {
     label: "PRINCIPAL",
@@ -89,8 +95,8 @@ const navGroups: { label: string; items: { id: ViewKey; label: string; icon: Luc
       { id: "members", label: "Membros / Jogadores", icon: Users },
       { id: "ranking", label: "Ranking", icon: Crown },
       { id: "tv-draw", label: "Sorteios (Modo TV)", icon: Tv2 },
-      { id: "tournaments", label: "Satélites", icon: Zap },
-      { id: "tournaments", label: "Estruturas de Blinds", icon: Clock3 },
+      { id: "satellites", label: "Satélites", icon: Zap },
+      { id: "blinds", label: "Estruturas de Blinds", icon: Clock3 },
       { id: "jackpot", label: "Jackpot", icon: Sparkles },
       { id: "settings", label: "Configurações", icon: Settings2 },
     ],
@@ -102,6 +108,8 @@ type ViewKey =
   | "dashboard"
   | "finance"
   | "tournaments"
+  | "satellites"
+  | "blinds"
   | "cash"
   | "bar"
   | "members"
@@ -134,6 +142,13 @@ type ActivityItem = {
 
 type TournamentStatus = "Agendado" | "Em andamento" | "Finalizado";
 
+type BlindLevel = {
+  level: number;
+  sb: number;
+  bb: number;
+  ante: number;
+};
+
 type Tournament = {
   id: string;
   name: string;
@@ -147,6 +162,19 @@ type Tournament = {
   entries: number;
   capacity: number;
 };
+
+const DEFAULT_BLIND_LEVELS: BlindLevel[] = [
+  { level: 1, sb: 100, bb: 200, ante: 200 },
+  { level: 2, sb: 150, bb: 300, ante: 300 },
+  { level: 3, sb: 200, bb: 400, ante: 400 },
+  { level: 4, sb: 300, bb: 600, ante: 600 },
+  { level: 5, sb: 400, bb: 800, ante: 800 },
+  { level: 6, sb: 500, bb: 1000, ante: 1000 },
+  { level: 7, sb: 800, bb: 1600, ante: 1600 },
+  { level: 8, sb: 1000, bb: 2000, ante: 2000 },
+  { level: 9, sb: 1500, bb: 3000, ante: 3000 },
+  { level: 10, sb: 2000, bb: 4000, ante: 4000 },
+];
 
 const TOURNAMENTS_STORAGE_KEY = "controlpoker_tournaments_v1";
 
@@ -204,7 +232,7 @@ function Sidebar({ view, setView, collapsed, setCollapsed, mobileOpen }: { view:
 
 function Topbar({ view, onNotify, onMenu }: { view: ViewKey; onNotify: () => void; onMenu: () => void }) {
   const [searchOpen, setSearchOpen] = useState(false);
-  const titleMap: Record<ViewKey, string> = { overview: "Visão Geral", dashboard: "Dashboard", finance: "Financeiro", tournaments: "Torneios", cash: "Cash Game", bar: "Bar / Consumo", members: "Membros / Jogadores", ranking: "Ranking", jackpot: "Jackpot", "tv-clock": "Clocker", "tv-draw": "Sorteio de Mesas", settings: "Configurações" };
+  const titleMap: Record<ViewKey, string> = { overview: "Visão Geral", dashboard: "Dashboard", finance: "Financeiro", tournaments: "Torneios", satellites: "Satélites", blinds: "Estruturas de Blinds", cash: "Cash Game", bar: "Bar / Consumo", members: "Membros / Jogadores", ranking: "Ranking", jackpot: "Jackpot", "tv-clock": "Clocker", "tv-draw": "Sorteio de Mesas", settings: "Configurações" };
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if (event.altKey && event.key.toLowerCase() === "s") { event.preventDefault(); setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 50); } }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, []);
   return <header className="topbar"><button className="mobile-menu-button topbar-icon" onClick={onMenu} aria-label="Abrir menu"><Menu size={18} /></button><div className="breadcrumb"><span>Control Poker</span><span>/</span><strong>{titleMap[view]}</strong></div><div className="topbar-actions">{searchOpen ? <div className="top-search"><Search size={15} /><input ref={searchRef} placeholder="Buscar jogador, torneio ou transação" onBlur={() => setSearchOpen(false)} /><kbd>ESC</kbd></div> : <button className="topbar-icon" onClick={() => { setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 50); }}><Search size={17} /></button>}<button className="topbar-icon notification-button" onClick={onNotify}><Bell size={17} /><span /></button><div className="topbar-date"><CalendarDays size={15} /><span>20 Nov, 2026</span><ChevronDown size={14} /></div></div></header>;
@@ -262,6 +290,7 @@ function TournamentsView({
   setToast,
   selectedId,
   setSelectedId,
+  initialTab = "resumo",
 }: {
   setView: (view: ViewKey) => void;
   tournaments: Tournament[];
@@ -270,8 +299,10 @@ function TournamentsView({
   setToast: (message: string) => void;
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
+  initialTab?: "resumo" | "blinds" | "premiacao";
 }) {
   const [modalOpen, setModalOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"resumo" | "blinds" | "premiacao">(initialTab);
   const [name, setName] = useState("");
   const [date, setDate] = useState("20/11/2026");
   const [time, setTime] = useState("20:00");
@@ -281,6 +312,10 @@ function TournamentsView({
   const [blindMinutes, setBlindMinutes] = useState("20");
   const [capacity, setCapacity] = useState("80");
   const [status, setStatus] = useState<TournamentStatus>("Agendado");
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
   const selectedTournament =
     tournaments.find(item => item.id === selectedId) ?? tournaments[0] ?? null;
@@ -334,6 +369,15 @@ function TournamentsView({
     setToast("Nova inscrição registrada no torneio!");
   };
 
+  const handleRemoveEntry = (id: string) => {
+    setTournaments(current =>
+      current.map(item =>
+        item.id === id ? { ...item, entries: Math.max(0, item.entries - 1) } : item
+      )
+    );
+    setToast("1 inscrição removida.");
+  };
+
   const handleToggleStatus = (id: string) => {
     setTournaments(current =>
       current.map(item => {
@@ -355,6 +399,13 @@ function TournamentsView({
     if (selectedId === id) setSelectedId(null);
     setToast("Torneio removido.");
   };
+
+  const collectedTotal = selectedTournament
+    ? selectedTournament.buyIn * selectedTournament.entries
+    : 0;
+  const effectivePrizePool = selectedTournament
+    ? Math.max(selectedTournament.guaranteed, collectedTotal)
+    : 0;
 
   return (
     <>
@@ -434,7 +485,7 @@ function TournamentsView({
                   <div>
                     <span>GARANTIDO</span>
                     <strong>{brl(selectedTournament.guaranteed)}</strong>
-                    <small>Arrecadado: {brl(selectedTournament.buyIn * selectedTournament.entries)}</small>
+                    <small>Arrecadado: {brl(collectedTotal)}</small>
                   </div>
                   <div>
                     <span>INSCRITOS</span>
@@ -464,29 +515,111 @@ function TournamentsView({
               </div>
 
               <div className="detail-tabs">
-                <span className="tab-active">Resumo da operação</span>
-                <span>Estrutura de blinds</span>
-                <span>Premiação</span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  style={{ cursor: "pointer" }}
+                  className={activeTab === "resumo" ? "tab-active" : ""}
+                  onClick={() => setActiveTab("resumo")}
+                >
+                  Resumo da operação
+                </span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  style={{ cursor: "pointer" }}
+                  className={activeTab === "blinds" ? "tab-active" : ""}
+                  onClick={() => setActiveTab("blinds")}
+                >
+                  Estrutura de blinds
+                </span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  style={{ cursor: "pointer" }}
+                  className={activeTab === "premiacao" ? "tab-active" : ""}
+                  onClick={() => setActiveTab("premiacao")}
+                >
+                  Premiação
+                </span>
               </div>
 
-              <div className="detail-feed">
-                <div>
-                  <div className="feed-icon"><Trophy size={15} /></div>
-                  <p>
-                    <strong>Premiação garantida configurada em {brl(selectedTournament.guaranteed)}</strong>
-                    <small>Com {selectedTournament.entries} entradas, o arrecadado atual é {brl(selectedTournament.buyIn * selectedTournament.entries)}</small>
-                  </p>
-                  <time>{selectedTournament.date}</time>
+              {activeTab === "resumo" && (
+                <div className="detail-feed">
+                  <div>
+                    <div className="feed-icon"><Users size={15} /></div>
+                    <p>
+                      <strong>{selectedTournament.entries} inscrições confirmadas de {selectedTournament.capacity} vagas</strong>
+                      <small>Arrecadação atual: {brl(collectedTotal)} · Clique em &quot;+ Registrar entrada&quot; para adicionar jogadores</small>
+                    </p>
+                    {selectedTournament.entries > 0 && (
+                      <Button type="button" variant="outline" onClick={() => handleRemoveEntry(selectedTournament.id)}>
+                        -1 entrada
+                      </Button>
+                    )}
+                  </div>
+                  <div>
+                    <div className="feed-icon"><Trophy size={15} /></div>
+                    <p>
+                      <strong>Premiação total estimada em {brl(effectivePrizePool)}</strong>
+                      <small>Garantido: {brl(selectedTournament.guaranteed)} · Arrecadado: {brl(collectedTotal)}</small>
+                    </p>
+                    <time>{selectedTournament.date}</time>
+                  </div>
+                  <div>
+                    <div className="feed-icon feed-icon-gold"><Clock3 size={15} /></div>
+                    <p>
+                      <strong>Estrutura de {selectedTournament.blindMinutes} minutos por nível</strong>
+                      <small>Stack inicial de {selectedTournament.stack} fichas por inscrição</small>
+                    </p>
+                    <time>{selectedTournament.time}</time>
+                  </div>
                 </div>
-                <div>
-                  <div className="feed-icon feed-icon-gold"><Clock3 size={15} /></div>
-                  <p>
-                    <strong>Estrutura de {selectedTournament.blindMinutes} minutos por nível</strong>
-                    <small>Stack inicial de {selectedTournament.stack} fichas por inscrição</small>
-                  </p>
-                  <time>{selectedTournament.time}</time>
+              )}
+
+              {activeTab === "blinds" && (
+                <div className="detail-feed">
+                  {DEFAULT_BLIND_LEVELS.map(lvl => (
+                    <div key={lvl.level}>
+                      <div className="feed-icon"><Clock3 size={15} /></div>
+                      <p>
+                        <strong>Nível {String(lvl.level).padStart(2, "0")} — Blinds {lvl.sb} / {lvl.bb}</strong>
+                        <small>Big Blind Ante: {lvl.ante} · Duração: {selectedTournament.blindMinutes} min</small>
+                      </p>
+                      <time>{(lvl.level - 1) * selectedTournament.blindMinutes} min</time>
+                    </div>
+                  ))}
                 </div>
-              </div>
+              )}
+
+              {activeTab === "premiacao" && (
+                <div className="detail-feed">
+                  <div>
+                    <div className="feed-icon feed-icon-gold"><Crown size={15} /></div>
+                    <p>
+                      <strong>1º Lugar (Campeão) — {brl(effectivePrizePool * 0.5)}</strong>
+                      <small>50% do prize pool total ({brl(effectivePrizePool)})</small>
+                    </p>
+                    <time>50%</time>
+                  </div>
+                  <div>
+                    <div className="feed-icon"><Trophy size={15} /></div>
+                    <p>
+                      <strong>2º Lugar (Vice-campeão) — {brl(effectivePrizePool * 0.3)}</strong>
+                      <small>30% do prize pool total ({brl(effectivePrizePool)})</small>
+                    </p>
+                    <time>30%</time>
+                  </div>
+                  <div>
+                    <div className="feed-icon"><Sparkles size={15} /></div>
+                    <p>
+                      <strong>3º Lugar — {brl(effectivePrizePool * 0.2)}</strong>
+                      <small>20% do prize pool total ({brl(effectivePrizePool)})</small>
+                    </p>
+                    <time>20%</time>
+                  </div>
+                </div>
+              )}
             </section>
           )}
         </div>
@@ -642,47 +775,260 @@ function SimpleModule({ view, setView }: { view: ViewKey; setView: (view: ViewKe
   };
   const current = config[view] ?? config.members;
   const Icon = current.icon;
-  return <><PageIntro eyebrow={current.eyebrow} title={current.title} description={current.description} action={() => setView("overview")} actionLabel="Voltar para visão geral" /><div className="simple-hero"><div className={cn("simple-hero-icon", `icon-${current.accent}`)}><Icon size={30} /></div><div><StatusBadge tone={current.accent === "orange" ? "orange" : current.accent === "gold" ? "gold" : current.accent === "purple" ? "cyan" : "cyan"}>Módulo conectado</StatusBadge><h2>Dados limpos</h2><p>Este módulo está pronto para receber novos registros. Nenhum dado anterior permanece gravado.</p></div><div className="simple-hero-action"><Button className="primary-button" onClick={() => setView("overview")}>Ver visão geral <ArrowUpRight size={15} /></Button></div></div><div className="simple-stats">{current.stats.map(([label, value, detail]) => <div className="panel simple-stat" key={label}><span className="eyebrow">{label}</span><strong>{value}</strong><small>{detail}</small></div>)}</div><section className="panel empty-state"><div className="empty-orbit"><Icon size={28} /></div><h2>Nenhum registro encontrado</h2><p>O módulo foi limpo e está pronto para uma nova operação.</p><div className="empty-actions"><Button className="primary-button" onClick={() => setView("overview")}><Grid2X2 size={15} /> Voltar ao hub</Button></div></section></>;
+  return <><PageIntro eyebrow={current.eyebrow} title={current.title} description={current.description} action={() => setView("overview")} actionLabel="Voltar para visão geral" /><div className="simple-hero"><div className={cn("simple-hero-icon", `icon-${current.accent}`)}><Icon size={30} /></div><div><StatusBadge tone={current.accent === "orange" ? "orange" : current.accent === "gold" ? "gold" : "cyan"}>Módulo conectado</StatusBadge><h2>Dados limpos</h2><p>Este módulo está pronto para receber novos registros. Nenhum dado anterior permanece gravado.</p></div><div className="simple-hero-action"><Button className="primary-button" onClick={() => setView("overview")}>Ver visão geral <ArrowUpRight size={15} /></Button></div></div><div className="simple-stats">{current.stats.map(([label, value, detail]) => <div className="panel simple-stat" key={label}><span className="eyebrow">{label}</span><strong>{value}</strong><small>{detail}</small></div>)}</div><section className="panel empty-state"><div className="empty-orbit"><Icon size={28} /></div><h2>Nenhum registro encontrado</h2><p>O módulo foi limpo e está pronto para uma nova operação.</p><div className="empty-actions"><Button className="primary-button" onClick={() => setView("overview")}><Grid2X2 size={15} /> Voltar ao hub</Button></div></section></>;
 }
 
 function TvView({ mode, setView, tournament }: { mode: "clock" | "draw"; setView: (view: ViewKey) => void; tournament: Tournament | null }) {
+  const [levelIndex, setLevelIndex] = useState(0);
+  const [secondsLeft, setSecondsLeft] = useState((tournament?.blindMinutes ?? 15) * 60);
+  const [running, setRunning] = useState(false);
+  const [seats, setSeats] = useState<string[]>(Array(8).fill(""));
+  const [revealed, setRevealed] = useState(false);
+
+  useEffect(() => {
+    setSecondsLeft((tournament?.blindMinutes ?? 15) * 60);
+    setLevelIndex(0);
+    setRunning(false);
+  }, [tournament?.id, tournament?.blindMinutes]);
+
+  useEffect(() => {
+    if (!running || mode !== "clock") return;
+    const timer = window.setInterval(() => {
+      setSecondsLeft(prev => {
+        if (prev > 1) return prev - 1;
+        setLevelIndex(idx => Math.min(DEFAULT_BLIND_LEVELS.length - 1, idx + 1));
+        return (tournament?.blindMinutes ?? 15) * 60;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [running, mode, tournament?.blindMinutes]);
+
+  if (!tournament) {
+    return (
+      <div className="tv-screen">
+        <div className="tv-topbar">
+          <button className="tv-brand" onClick={() => setView("overview")}>
+            <LogoMark />
+            <span className="tv-brand-separator" />
+            <span className="tv-event-label">MODO TV <small>SEM EVENTO SELECIONADO</small></span>
+          </button>
+          <button className="tv-exit" onClick={() => setView("tournaments")}>
+            <X size={16} /> Sair da TV
+          </button>
+        </div>
+        <div className="empty-state tv-empty-state">
+          <div className="empty-orbit">{mode === "clock" ? <Clock3 size={28} /> : <Grid2X2 size={28} />}</div>
+          <h2>{mode === "clock" ? "Nenhum torneio no Clocker" : "Nenhum sorteio disponível"}</h2>
+          <p>Crie um torneio primeiro para ativar o relógio de blinds ou o sorteio de mesas.</p>
+          <div className="empty-actions">
+            <Button className="primary-button" onClick={() => setView("tournaments")}>
+              <Trophy size={15} /> Ir para torneios
+            </Button>
+          </div>
+        </div>
+        <div className="tv-footer-hint">
+          <span>CONTROL POKER</span>
+          <span>Gestão de clubes · Modo TV</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === "clock") {
+    const currentLevel = DEFAULT_BLIND_LEVELS[levelIndex] ?? DEFAULT_BLIND_LEVELS[0];
+    const nextLevel = DEFAULT_BLIND_LEVELS[levelIndex + 1] ?? null;
+    const prizePool = Math.max(tournament.guaranteed, tournament.buyIn * tournament.entries);
+    const numericStack = Number(tournament.stack.replace(/\D/g, "")) || 10000;
+    const avgStack = tournament.entries > 0 ? numericStack.toLocaleString("pt-BR") : tournament.stack;
+
+    return (
+      <div className="tv-screen">
+        <div className="tv-topbar">
+          <button className="tv-brand" onClick={() => setView("tournaments")}>
+            <LogoMark />
+            <span className="tv-brand-separator" />
+            <span className="tv-event-label">
+              CLOCKER OFICIAL <small>{tournament.name.toUpperCase()}</small>
+            </span>
+          </button>
+          <div className="tv-top-actions">
+            <StatusBadge tone={running ? "green" : "orange"}>{running ? "RELÓGIO ATIVO" : "PAUSADO"}</StatusBadge>
+            <button className="tv-exit" onClick={() => setView("tournaments")}>
+              <X size={16} /> Voltar ao torneio
+            </button>
+          </div>
+        </div>
+
+        <div className="clock-layout">
+          <div className="clock-side">
+            <div className="tv-stat-block">
+              <span>INSCRITOS</span>
+              <strong>{tournament.entries} <small>/ {tournament.capacity}</small></strong>
+            </div>
+            <div className="tv-stat-block">
+              <span>STACK MÉDIO</span>
+              <strong>{avgStack}</strong>
+            </div>
+          </div>
+
+          <div className="clock-center">
+            <div className="clock-kicker">
+              <span className="neon-line" />
+              <span>NÍVEL {currentLevel.level} DE {DEFAULT_BLIND_LEVELS.length}</span>
+              <span className="neon-line" />
+            </div>
+            <div className="clock-time">{formatTime(secondsLeft)}</div>
+            <div className="clock-blinds">
+              <strong>{currentLevel.sb} / {currentLevel.bb}</strong>
+              <span>BIG BLIND ANTE {currentLevel.ante}</span>
+            </div>
+            <div className="next-level">
+              <span>PRÓXIMO NÍVEL:</span>
+              <b>{nextLevel ? `${nextLevel.sb} / ${nextLevel.bb}` : "NÍVEL FINAL"}</b>
+              <small>{nextLevel ? `(Ante ${nextLevel.ante})` : ""}</small>
+            </div>
+            <div className="prize-strip">
+              <span>PREMIAÇÃO TOTAL</span>
+              <strong>{brl(prizePool)}</strong>
+              <span>BUY-IN</span>
+              <strong>{brl(tournament.buyIn)}</strong>
+            </div>
+          </div>
+
+          <div className="clock-side right">
+            <div className="tv-stat-block">
+              <span>GARANTIDO</span>
+              <strong>{brl(tournament.guaranteed)}</strong>
+            </div>
+            <div className="tv-stat-block">
+              <span>TEMPO NÍVEL</span>
+              <strong>{tournament.blindMinutes} <small>min</small></strong>
+            </div>
+          </div>
+
+          <div className="clock-footer">
+            <div><span>ENTRADA</span><strong>{brl(tournament.buyIn)}</strong></div>
+            <div><span>STACK INICIAL</span><strong>{tournament.stack}</strong></div>
+            <div><span>ARRECADADO</span><strong>{brl(tournament.buyIn * tournament.entries)}</strong></div>
+            <div className="clock-controls">
+              <button
+                type="button"
+                title="Nível anterior"
+                onClick={() => {
+                  setLevelIndex(i => Math.max(0, i - 1));
+                  setSecondsLeft(tournament.blindMinutes * 60);
+                }}
+              >
+                «
+              </button>
+              <button
+                type="button"
+                className="clock-play"
+                title={running ? "Pausar" : "Iniciar"}
+                onClick={() => setRunning(r => !r)}
+              >
+                {running ? <Pause size={16} /> : <Play size={16} />}
+              </button>
+              <button
+                type="button"
+                title="Próximo nível"
+                onClick={() => {
+                  setLevelIndex(i => Math.min(DEFAULT_BLIND_LEVELS.length - 1, i + 1));
+                  setSecondsLeft(tournament.blindMinutes * 60);
+                }}
+              >
+                »
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="tv-footer-hint">
+          <span>CONTROL POKER · CLOCKER</span>
+          <span>Use Play/Pause para controlar o tempo dos blinds</span>
+        </div>
+      </div>
+    );
+  }
+
+  const handleDrawSeats = () => {
+    const count = Math.min(8, Math.max(2, tournament.entries || 8));
+    const labels = Array.from({ length: count }, (_, idx) => `Jogador #${idx + 1}`);
+    for (let i = labels.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [labels[i], labels[j]] = [labels[j], labels[i]];
+    }
+    const nextSeats = Array(8).fill("");
+    labels.forEach((label, idx) => {
+      nextSeats[idx] = label;
+    });
+    setSeats(nextSeats);
+    setRevealed(true);
+  };
+
   return (
     <div className="tv-screen">
       <div className="tv-topbar">
-        <button className="tv-brand" onClick={() => setView("overview")}>
+        <button className="tv-brand" onClick={() => setView("tournaments")}>
           <LogoMark />
           <span className="tv-brand-separator" />
           <span className="tv-event-label">
-            MODO TV <small>{tournament ? tournament.name.toUpperCase() : "SEM EVENTO SELECIONADO"}</small>
+            SORTEIO DE MESAS <small>{tournament.name.toUpperCase()}</small>
           </span>
         </button>
-        <button className="tv-exit" onClick={() => setView("overview")}>
-          <X size={16} /> Sair da TV
+        <button className="tv-exit" onClick={() => setView("tournaments")}>
+          <X size={16} /> Voltar ao torneio
         </button>
       </div>
-      <div className="empty-state tv-empty-state">
-        <div className="empty-orbit">{mode === "clock" ? <Clock3 size={28} /> : <Grid2X2 size={28} />}</div>
-        <h2>
-          {tournament
-            ? `${tournament.name} · ${mode === "clock" ? `Blinds ${tournament.blindMinutes} min` : `${tournament.entries} inscritos`}`
-            : mode === "clock"
-            ? "Nenhum torneio no Clocker"
-            : "Nenhum sorteio disponível"}
-        </h2>
-        <p>
-          {tournament
-            ? `Buy-in ${brl(tournament.buyIn)} · Garantido ${brl(tournament.guaranteed)} · Stack ${tournament.stack}`
-            : "Selecione ou crie um torneio para ativar esta tela."}
-        </p>
-        <div className="empty-actions">
-          <Button className="primary-button" onClick={() => setView("tournaments")}>
-            <Trophy size={15} /> Ir para torneios
-          </Button>
+
+      <div className="draw-layout">
+        <div className="draw-heading">
+          <h1>Sorteio de Assentos</h1>
+          <p>{tournament.name} · {tournament.entries} inscritos confirmados</p>
+        </div>
+
+        <div className="poker-table-large">
+          <div className="table-label">
+            <span>MESA</span>
+            <strong>01</strong>
+          </div>
+          {seats.map((playerName, idx) => (
+            <div
+              key={idx}
+              className={cn(
+                "large-seat",
+                `large-seat-${idx + 1}`,
+                revealed && playerName && "seat-revealed"
+              )}
+            >
+              <span>{revealed && playerName ? playerName.replace("Jogador ", "") : `Pos ${idx + 1}`}</span>
+              <small>{revealed && playerName ? `Assento 0${idx + 1}` : "Livre"}</small>
+            </div>
+          ))}
+        </div>
+
+        <div className="draw-bottom">
+          <div className="draw-players">
+            <span>DISTRIBUIÇÃO AUTOMÁTICA DE ASSENTOS</span>
+            <div>
+              <div className="draw-player">
+                <span>Clique no botão ao lado para sortear os assentos da mesa</span>
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            className={cn("draw-button", revealed && "draw-done")}
+            onClick={handleDrawSeats}
+          >
+            <Sparkles size={15} /> {revealed ? "Sortear novamente" : "Sortear assentos"}
+          </button>
         </div>
       </div>
+
       <div className="tv-footer-hint">
-        <span>CONTROL POKER</span>
-        <span>Gestão de clubes · Modo TV</span>
+        <span>CONTROL POKER · MODO TV</span>
+        <span>Sorteio aleatório oficial de posições</span>
       </div>
     </div>
   );
@@ -726,7 +1072,7 @@ export default function Home() {
     if (view === "overview") return <OverviewView setView={setView} activities={activities} tournaments={tournaments} />;
     if (view === "dashboard") return <DashboardView setView={setView} />;
     if (view === "finance") return <FinanceView transactions={transactions} setTransactions={setTransactions} activities={activities} setActivities={setActivities} />;
-    if (view === "tournaments") {
+    if (view === "tournaments" || view === "satellites" || view === "blinds") {
       return (
         <TournamentsView
           setView={setView}
@@ -736,6 +1082,7 @@ export default function Home() {
           setToast={setToast}
           selectedId={selectedTournamentId}
           setSelectedId={setSelectedTournamentId}
+          initialTab={view === "blinds" ? "blinds" : "resumo"}
         />
       );
     }
