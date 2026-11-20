@@ -48,6 +48,13 @@ function collectLocalStateSnapshot(): Record<string, unknown> {
 function findPrimaryStateObject(
   snapshot: Record<string, unknown>
 ): Record<string, unknown> | null {
+  if (
+    snapshot.__liveContext &&
+    typeof snapshot.__liveContext === "object" &&
+    !Array.isArray(snapshot.__liveContext)
+  ) {
+    return snapshot.__liveContext as Record<string, unknown>;
+  }
   for (const val of Object.values(snapshot)) {
     if (
       val &&
@@ -84,29 +91,32 @@ async function upsertNormalizedTables(primary: Record<string, unknown>): Promise
     body: JSON.stringify(clubPayload),
   });
 
-  if (Array.isArray(primary.blindStructures) && primary.blindStructures.length > 0) {
-    const structRows = primary.blindStructures.map(
-      (s: Record<string, unknown>, idx: number) => ({
-        id: String(s.id ?? `struct-${idx + 1}`),
-        club_id: DEFAULT_CLUB_ID,
-        name: String(s.name ?? `Estrutura ${idx + 1}`),
-        level_duration: Number(s.levelDuration ?? s.duration ?? 15),
-        bb_ante_enabled: Boolean(s.bbAnteEnabled ?? false),
-        bb_ante_start_level: Number(s.bbAnteStartLevel ?? 1),
-        buy_in: Number(s.buyIn ?? primary.defaultBuyIn ?? 30),
-        rebuy: Number(s.rebuy ?? primary.defaultRebuy ?? 30),
-        addon: Number(s.addon ?? primary.defaultAddon ?? 40),
-        buy_in_chips: Number(s.buyInChips ?? primary.buyInChips ?? 15000),
-        rebuy_chips: Number(s.rebuyChips ?? primary.rebuyChips ?? 15000),
-        addon_chips: Number(s.addonChips ?? primary.addonChips ?? 20000),
-        levels: Array.isArray(s.levels)
-          ? s.levels
-          : Array.isArray(s.blindLevels)
-          ? s.blindLevels
-          : [],
-        updated_at: nowIso,
-      })
-    );
+  const structures = Array.isArray(primary.blindStructures)
+    ? primary.blindStructures
+    : Array.isArray(primary.structures)
+    ? primary.structures
+    : [];
+  if (structures.length > 0) {
+    const structRows = structures.map((s: Record<string, unknown>, idx: number) => ({
+      id: String(s.id ?? `struct-${idx + 1}`),
+      club_id: DEFAULT_CLUB_ID,
+      name: String(s.name ?? `Estrutura ${idx + 1}`),
+      level_duration: Number(s.levelDuration ?? s.duration ?? 15),
+      bb_ante_enabled: Boolean(s.bbAnteEnabled ?? false),
+      bb_ante_start_level: Number(s.bbAnteStartLevel ?? 1),
+      buy_in: Number(s.buyIn ?? primary.defaultBuyIn ?? 30),
+      rebuy: Number(s.rebuy ?? primary.defaultRebuy ?? 30),
+      addon: Number(s.addon ?? primary.defaultAddon ?? 40),
+      buy_in_chips: Number(s.buyInChips ?? primary.buyInChips ?? 15000),
+      rebuy_chips: Number(s.rebuyChips ?? primary.rebuyChips ?? 15000),
+      addon_chips: Number(s.addonChips ?? primary.addonChips ?? 20000),
+      levels: Array.isArray(s.levels)
+        ? s.levels
+        : Array.isArray(s.blindLevels)
+        ? s.blindLevels
+        : [],
+      updated_at: nowIso,
+    }));
     await fetch(`${SUPABASE_URL}/rest/v1/blind_structures?on_conflict=id`, {
       method: "POST",
       headers: buildHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" }),
@@ -206,40 +216,43 @@ async function upsertNormalizedTables(primary: Record<string, unknown>): Promise
 
 let isPushing = false;
 let isApplyingRemote = false;
+let lastSyncedPayloadHash = "";
+let lastKnownLiveContext: Record<string, unknown> | null = null;
 let localChannel: BroadcastChannel | null = null;
 let realtimeSocket: WebSocket | null = null;
 const tabClientId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-function applySnapshotToLocalStorage(
+function applySnapshotEverywhere(
   remoteState: Record<string, unknown>,
   updatedAt?: string
-): boolean {
-  let changed = false;
+): void {
   isApplyingRemote = true;
   try {
     for (const [k, v] of Object.entries(remoteState)) {
-      if (k === "__primaryState" || k === SYNC_META_KEY) continue;
+      if (k === "__liveContext" || k === "__primaryState" || k === SYNC_META_KEY) continue;
       const serialized = typeof v === "string" ? v : JSON.stringify(v);
       if (window.localStorage.getItem(k) !== serialized) {
         window.localStorage.setItem(k, serialized);
-        changed = true;
       }
     }
     if (updatedAt) {
       window.localStorage.setItem(SYNC_META_KEY, updatedAt);
     }
-    if (changed) {
-      const primary =
-        (remoteState.__primaryState as Record<string, unknown> | undefined) ??
-        findPrimaryStateObject(remoteState);
 
-      window.dispatchEvent(
-        new CustomEvent(SYNC_EVENT_NAME, {
-          detail: { primary, snapshot: remoteState },
-        })
-      );
+    const liveContext =
+      (remoteState.__liveContext as Record<string, unknown> | undefined) ??
+      (remoteState.__primaryState as Record<string, unknown> | undefined) ??
+      findPrimaryStateObject(remoteState);
+
+    if (liveContext) {
+      lastKnownLiveContext = liveContext;
     }
-    return changed;
+
+    window.dispatchEvent(
+      new CustomEvent(SYNC_EVENT_NAME, {
+        detail: { liveContext, primary: liveContext, snapshot: remoteState },
+      })
+    );
   } finally {
     isApplyingRemote = false;
   }
@@ -277,19 +290,26 @@ function broadcastRealtimeSignal(snapshot: Record<string, unknown>, updatedAt: s
 }
 
 export async function pushStateToSupabase(
-  explicitPrimary?: Record<string, unknown>
+  explicitLiveContext?: Record<string, unknown>
 ): Promise<boolean> {
   if (isPushing || isApplyingRemote) return false;
   isPushing = true;
   try {
     const snapshot = collectLocalStateSnapshot();
-    if (explicitPrimary) {
-      snapshot.__primaryState = explicitPrimary;
+    if (explicitLiveContext) {
+      lastKnownLiveContext = explicitLiveContext;
     }
-    const primary = explicitPrimary ?? findPrimaryStateObject(snapshot);
+    if (lastKnownLiveContext) {
+      snapshot.__liveContext = lastKnownLiveContext;
+    }
+
+    const primary = findPrimaryStateObject(snapshot);
     if (!primary && Object.keys(snapshot).length === 0) {
       return false;
     }
+
+    const payloadHash = JSON.stringify(snapshot);
+    lastSyncedPayloadHash = payloadHash;
 
     const nowIso = new Date().toISOString();
     window.localStorage.setItem(SYNC_META_KEY, nowIso);
@@ -345,19 +365,14 @@ export async function pullStateFromSupabase(
       return null;
     }
 
-    const remoteUpdated = row?.updated_at ? Date.parse(row.updated_at) : 0;
-    const localUpdatedRaw = window.localStorage.getItem(SYNC_META_KEY);
-    const localUpdated = localUpdatedRaw ? Date.parse(localUpdatedRaw) : 0;
-
-    if (!force && localUpdated > 0 && remoteUpdated <= localUpdated) {
+    const remoteHash = JSON.stringify(remoteState);
+    if (!force && remoteHash === lastSyncedPayloadHash) {
       return null;
     }
 
-    applySnapshotToLocalStorage(remoteState, row?.updated_at);
-    return (
-      (remoteState.__primaryState as Record<string, unknown> | undefined) ??
-      findPrimaryStateObject(remoteState)
-    );
+    lastSyncedPayloadHash = remoteHash;
+    applySnapshotEverywhere(remoteState, row?.updated_at);
+    return findPrimaryStateObject(remoteState);
   } catch {
     return null;
   }
@@ -410,7 +425,7 @@ function connectSupabaseRealtimeWebSocket(): void {
           payload?: Record<string, unknown>;
         };
         if (msg.event === "broadcast" || msg.event === "postgres_changes") {
-          void pullStateFromSupabase(true);
+          void pullStateFromSupabase(false);
         }
       } catch {
         // Ignore malformed messages
@@ -446,23 +461,24 @@ export function initSupabaseRealtimeSync(): void {
         updatedAt?: string;
       };
       if (data?.sender === tabClientId || !data?.snapshot) return;
-      applySnapshotToLocalStorage(data.snapshot, data.updatedAt);
+      lastSyncedPayloadHash = JSON.stringify(data.snapshot);
+      applySnapshotEverywhere(data.snapshot, data.updatedAt);
     };
   }
 
   window.addEventListener("storage", ev => {
     if (!ev.key || ev.key === SYNC_META_KEY || isApplyingRemote) return;
     const snapshot = collectLocalStateSnapshot();
-    const primary = findPrimaryStateObject(snapshot);
+    const liveContext = findPrimaryStateObject(snapshot);
     window.dispatchEvent(
       new CustomEvent(SYNC_EVENT_NAME, {
-        detail: { primary, snapshot },
+        detail: { liveContext, primary: liveContext, snapshot },
       })
     );
   });
 
   window.addEventListener("focus", () => {
-    void pullStateFromSupabase(true);
+    void pullStateFromSupabase(false);
   });
 
   const origSetItem = window.localStorage.setItem.bind(window.localStorage);
