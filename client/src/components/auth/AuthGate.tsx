@@ -35,6 +35,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    if (!profileMenuOpen && !accessModalOpen) {
+      if (document.body.style.pointerEvents === "none") {
+        document.body.style.pointerEvents = "";
+      }
+      if (document.body.style.overflow === "hidden") {
+        document.body.style.overflow = "";
+      }
+    }
+  }, [profileMenuOpen, accessModalOpen]);
+
+  useEffect(() => {
     if (!profileMenuOpen) return;
 
     const handlePointerDown = (event: MouseEvent) => {
@@ -69,15 +80,16 @@ export function AuthGate({ children }: { children: ReactNode }) {
         document.querySelector<HTMLElement>(".sidebar");
       if (!sidebar) return;
 
-      const allElements = Array.from(sidebar.querySelectorAll<HTMLElement>("*"));
-      const clubTitleEl = allElements.find(el => {
-        if (el.children.length > 0) return false;
+      const leaves = Array.from(sidebar.querySelectorAll<HTMLElement>("div, span, p, strong")).filter(
+        el => el.children.length === 0
+      );
+
+      const clubTitleEl = leaves.find(el => {
         const txt = (el.textContent ?? "").trim();
         return txt === "Poker Club SP" || el.dataset.authUserTitle === "true";
       });
 
-      const subTitleEl = allElements.find(el => {
-        if (el.children.length > 0) return false;
+      const subTitleEl = leaves.find(el => {
         const txt = (el.textContent ?? "").trim();
         return (
           txt.includes("Unidade principal") ||
@@ -89,15 +101,18 @@ export function AuthGate({ children }: { children: ReactNode }) {
       const anchorEl = clubTitleEl ?? subTitleEl;
       if (!anchorEl) return;
 
-      if (clubTitleEl) {
+      const targetTitle = isAdmin ? "Poker Club SP" : currentUser.name;
+      if (clubTitleEl && clubTitleEl.textContent !== targetTitle) {
         clubTitleEl.dataset.authUserTitle = "true";
-        clubTitleEl.textContent = isAdmin ? "Poker Club SP" : currentUser.name;
+        clubTitleEl.textContent = targetTitle;
       }
-      if (subTitleEl) {
+
+      const targetSub = isAdmin
+        ? "Admin · Unidade principal"
+        : `${currentUser.jobTitle} · Restrito`;
+      if (subTitleEl && subTitleEl.textContent !== targetSub) {
         subTitleEl.dataset.authUserSubtitle = "true";
-        subTitleEl.textContent = isAdmin
-          ? "Admin · Unidade principal"
-          : `${currentUser.jobTitle} · Restrito`;
+        subTitleEl.textContent = targetSub;
       }
 
       let triggerEl: HTMLElement | null =
@@ -112,21 +127,19 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
       if (!triggerEl) return;
 
-      const badgeEl = Array.from(triggerEl.querySelectorAll<HTMLElement>("*")).find(el => {
+      const badgeEl = Array.from(triggerEl.querySelectorAll<HTMLElement>("div, span")).find(el => {
         if (el.children.length > 0) return false;
         const txt = (el.textContent ?? "").trim();
         return (txt.length === 2 && /^[A-ZÀ-Ú]{2}$/.test(txt)) || el.dataset.authUserBadge === "true";
       });
-      if (badgeEl) {
+      const targetBadge = isAdmin ? "AD" : getInitials(currentUser.name);
+      if (badgeEl && badgeEl.textContent !== targetBadge) {
         badgeEl.dataset.authUserBadge = "true";
-        badgeEl.textContent = isAdmin ? "AD" : getInitials(currentUser.name);
+        badgeEl.textContent = targetBadge;
       }
 
       triggerEl.style.cursor = "pointer";
       triggerEl.setAttribute("data-sidebar-user-trigger", "true");
-      triggerEl.title = isAdmin
-        ? "Gerenciar usuários, acessos ou sair"
-        : "Opções da conta / Sair";
 
       if (triggerEl.dataset.authClickBound !== "true") {
         triggerEl.dataset.authClickBound = "true";
@@ -144,14 +157,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
       }
     };
 
-    bindBottomSidebarCard();
-
-    const observer = new MutationObserver(() => {
-      bindBottomSidebarCard();
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    return () => observer.disconnect();
+    const timer = window.setTimeout(bindBottomSidebarCard, 120);
+    return () => window.clearTimeout(timer);
   }, [currentUser, isAdmin]);
 
   useEffect(() => {
@@ -243,14 +250,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
       }
     };
 
-    enforcePermissions();
-
-    const observer = new MutationObserver(() => {
-      enforcePermissions();
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    return () => observer.disconnect();
+    const timer = window.setTimeout(enforcePermissions, 120);
+    document.addEventListener("click", enforcePermissions);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("click", enforcePermissions);
+    };
   }, [currentUser, isAdmin]);
 
   if (!currentUser) {
