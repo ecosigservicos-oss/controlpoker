@@ -1,4 +1,4 @@
-import { initSupabaseRealtimeSync, isSerializedReactElement, pushStateToSupabase, sanitizeSyncValue } from "@/lib/supabaseSync";
+import { containsReactComponentOrElement, initSupabaseRealtimeSync, pushStateToSupabase, sanitizeSyncValue } from "@/lib/supabaseSync";
 import { useRef, createContext, useContext, useEffect, useState, type ReactNode  } from "react";
 import {
   DEFAULT_BLIND_LEVELS,
@@ -174,11 +174,26 @@ useEffect(() => {
     }, 150);
     return () => window.clearTimeout(timer);
   }, [transactions, activities, toast, blindLevels, rules, tournaments, savedPlayers]);
-  // Sincronizacao segura com validacao de tipos (previne Minified React error #130)
+useEffect(() => {
+    if (!didMountSyncRef.current) {
+      didMountSyncRef.current = true;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void pushStateToSupabase({ transactions, activities, blindLevels, rules, tournaments, savedPlayers });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [transactions, activities, blindLevels, rules, tournaments, savedPlayers]);
+  // Sincronizacao segura: ignora estados com componentes/icones React (previne React error #130)
   const didMountSyncRef = useRef(false);
 
   const applySafeRemoteValue = <T,>(prev: T, rawIncoming: unknown): T => {
-    if (rawIncoming === undefined || rawIncoming === null || isSerializedReactElement(rawIncoming)) {
+    if (
+      rawIncoming === undefined ||
+      rawIncoming === null ||
+      containsReactComponentOrElement(prev) ||
+      containsReactComponentOrElement(rawIncoming)
+    ) {
       return prev;
     }
     const incoming = sanitizeSyncValue(rawIncoming);
@@ -236,6 +251,7 @@ useEffect(() => {
     }, 150);
     return () => window.clearTimeout(timer);
   }, [transactions, activities, blindLevels, rules, tournaments, savedPlayers]);
+
 
 
 

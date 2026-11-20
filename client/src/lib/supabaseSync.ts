@@ -1,5 +1,5 @@
 // Sincronizacao instantanea em tempo real entre PokerGestor e Supabase (PostgreSQL + Realtime)
-// Inclui sanitizacao automatica contra objetos invalidos no JSX (React error #130) e trava de escrita
+// v7: Protecao total contra React error #130 (icones/componentes serializados) e revisao monotonica
 
 export const SUPABASE_URL =
   import.meta.env.VITE_SUPABASE_URL || "https://zwqpykunofoetqwioydy.supabase.co";
@@ -11,7 +11,8 @@ export const SUPABASE_KEY =
 const DEFAULT_CLUB_ID = "default-club";
 const SYNC_META_KEY = "pokergestor_supabase_last_sync_at";
 const SYNC_EVENT_NAME = "pokergestor:supabase-synced";
-const BROADCAST_CHANNEL_NAME = "pokergestor_instant_sync_v1";
+const BROADCAST_CHANNEL_NAME = "pokergestor_instant_sync_v2";
+const SYNC_SCHEMA_VERSION = 2;
 
 function buildHeaders(extra?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = {
@@ -25,11 +26,37 @@ function buildHeaders(extra?: Record<string, string>): Record<string, string> {
   return headers;
 }
 
-export function isSerializedReactElement(val: unknown): boolean {
-  if (!val || typeof val !== "object" || Array.isArray(val)) return false;
+export function containsReactComponentOrElement(val: unknown, depth = 0): boolean {
+  if (depth > 5 || val === null || val === undefined) return false;
+  if (typeof val === "function") return true;
+  if (typeof val !== "object") return false;
   const obj = val as Record<string, unknown>;
-  if ("$$typeof" in obj) return true;
-  if ("props" in obj && ("type" in obj || "_owner" in obj || "key" in obj)) return true;
+  if ("$$typeof" in obj || "_owner" in obj) return true;
+  if (Array.isArray(val)) {
+    return val.some(item => containsReactComponentOrElement(item, depth + 1));
+  }
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === "icon" || k === "Icon" || k === "component" || k === "element") {
+      return true;
+    }
+    if (containsReactComponentOrElement(v, depth + 1)) return true;
+  }
+  return false;
+}
+
+function hasCorruptedIconField(val: unknown, depth = 0): boolean {
+  if (depth > 5 || !val || typeof val !== "object") return false;
+  if (Array.isArray(val)) {
+    return val.some(item => hasCorruptedIconField(item, depth + 1));
+  }
+  const obj = val as Record<string, unknown>;
+  if ("$$typeof" in obj || "_owner" in obj) return true;
+  if ("icon" in obj || "Icon" in obj || "component" in obj || "element" in obj) {
+    return true;
+  }
+  for (const v of Object.values(obj)) {
+    if (hasCorruptedIconField(v, depth + 1)) return true;
+  }
   return false;
 }
 
@@ -37,12 +64,12 @@ export function sanitizeSyncValue<T>(val: T, fallback?: T): T {
   if (val === null || val === undefined) {
     return (fallback !== undefined ? fallback : val) as T;
   }
-  if (isSerializedReactElement(val)) {
+  if (containsReactComponentOrElement(val)) {
     return (fallback !== undefined ? fallback : undefined) as T;
   }
   if (Array.isArray(val)) {
     const cleaned = val
-      .filter(item => !isSerializedReactElement(item))
+      .filter(item => !containsReactComponentOrElement(item))
       .map(item => sanitizeSyncValue(item));
     return cleaned as unknown as T;
   }
@@ -50,7 +77,8 @@ export function sanitizeSyncValue<T>(val: T, fallback?: T): T {
     const src = val as Record<string, unknown>;
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(src)) {
-      if (isSerializedReactElement(v)) continue;
+      if (k === "icon" || k === "Icon" || k === "component" || k === "element") continue;
+      if (containsReactComponentOrElement(v)) continue;
       if (
         (k === "name" ||
           k === "playerName" ||
@@ -86,8 +114,10 @@ function isUiNavigationKey(key: string): boolean {
   );
 }
 
-function sanitizeExistingLocalStorage(): void {
+export function purgeCorruptedLocalStorage(): void {
+  if (typeof window === "undefined") return;
   try {
+    const keysToRemove: string[] = [];
     for (let i = 0; i < window.localStorage.length; i++) {
       const key = window.localStorage.key(i);
       if (!key || key === SYNC_META_KEY || key.startsWith("__")) continue;
@@ -95,19 +125,23 @@ function sanitizeExistingLocalStorage(): void {
       if (!raw || (!raw.startsWith("{") && !raw.startsWith("["))) continue;
       try {
         const parsed = JSON.parse(raw);
-        const sanitized = sanitizeSyncValue(parsed);
-        const reserialized = JSON.stringify(sanitized);
-        if (reserialized && reserialized !== raw) {
-          window.localStorage.setItem(key, reserialized);
+        if (hasCorruptedIconField(parsed)) {
+          keysToRemove.push(key);
         }
       } catch {
-        // Ignore non-JSON values
+        keysToRemove.push(key);
       }
+    }
+    for (const k of keysToRemove) {
+      window.localStorage.removeItem(k);
     }
   } catch {
     // Ignore storage access errors
   }
 }
+
+// Executa limpeza imediatamente ao importar o modulo (antes do primeiro render do React)
+purgeCorruptedLocalStorage();
 
 function collectLocalStateSnapshot(): Record<string, unknown> {
   const snapshot: Record<string, unknown> = {};
@@ -118,7 +152,9 @@ function collectLocalStateSnapshot(): Record<string, unknown> {
       const raw = window.localStorage.getItem(key);
       if (raw !== null) {
         try {
-          snapshot[key] = sanitizeSyncValue(JSON.parse(raw));
+          const parsed = JSON.parse(raw);
+          if (hasCorruptedIconField(parsed)) continue;
+          snapshot[key] = sanitizeSyncValue(parsed);
         } catch {
           snapshot[key] = raw;
         }
@@ -330,6 +366,9 @@ function applySnapshotEverywhere(
   rawRemoteState: Record<string, unknown>,
   updatedAt?: string
 ): void {
+  if (Number(rawRemoteState.__schemaVersion ?? 0) !== SYNC_SCHEMA_VERSION) {
+    return;
+  }
   const remoteState = sanitizeSyncValue(rawRemoteState);
   isApplyingRemote = true;
   try {
@@ -339,11 +378,13 @@ function applySnapshotEverywhere(
         k === "__primaryState" ||
         k === "__rev" ||
         k === "__writerId" ||
+        k === "__schemaVersion" ||
         k === SYNC_META_KEY ||
         isUiNavigationKey(k)
       ) {
         continue;
       }
+      if (hasCorruptedIconField(v)) continue;
       const serialized = typeof v === "string" ? v : JSON.stringify(v);
       if (window.localStorage.getItem(k) !== serialized) {
         window.localStorage.setItem(k, serialized);
@@ -432,6 +473,7 @@ export async function pushStateToSupabase(
     }
 
     currentRevision += 1;
+    snapshot.__schemaVersion = SYNC_SCHEMA_VERSION;
     snapshot.__rev = currentRevision;
     snapshot.__writerId = tabClientId;
 
@@ -499,7 +541,11 @@ export async function pullStateFromSupabase(
     const remoteState = row?.state_json;
     hasCompletedInitialPull = true;
 
-    if (!remoteState || Object.keys(remoteState).length === 0) {
+    if (
+      !remoteState ||
+      Object.keys(remoteState).length === 0 ||
+      Number(remoteState.__schemaVersion ?? 0) !== SYNC_SCHEMA_VERSION
+    ) {
       await pushStateToSupabase(undefined, true);
       return null;
     }
@@ -598,9 +644,7 @@ export function initSupabaseRealtimeSync(): void {
   if (initialized || typeof window === "undefined") return;
   initialized = true;
 
-  // Limpa imediatamente qualquer objeto corrompido salvo anteriormente no localStorage antes do React renderizar
-  sanitizeExistingLocalStorage();
-
+  purgeCorruptedLocalStorage();
   void pullStateFromSupabase(true);
 
   if ("BroadcastChannel" in window) {
@@ -612,6 +656,7 @@ export function initSupabaseRealtimeSync(): void {
         updatedAt?: string;
       };
       if (data?.sender === tabClientId || !data?.snapshot) return;
+      if (Number(data.snapshot.__schemaVersion ?? 0) !== SYNC_SCHEMA_VERSION) return;
       if (isPushing || Date.now() < localWriteLockUntil) return;
       const incomingRev = Number(data.snapshot.__rev ?? 0);
       if (incomingRev > 0 && incomingRev <= currentRevision) return;
