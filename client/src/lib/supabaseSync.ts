@@ -1,5 +1,5 @@
 // Sincronizacao instantanea em tempo real entre PokerGestor e Supabase (PostgreSQL + Realtime)
-// v7: Protecao total contra React error #130 (icones/componentes serializados) e revisao monotonica
+// v8: Atualizacao automatica imediata na tela da TV e entre celular/PC sem precisar apertar F5
 
 export const SUPABASE_URL =
   import.meta.env.VITE_SUPABASE_URL || "https://zwqpykunofoetqwioydy.supabase.co";
@@ -26,36 +26,24 @@ function buildHeaders(extra?: Record<string, string>): Record<string, string> {
   return headers;
 }
 
-export function containsReactComponentOrElement(val: unknown, depth = 0): boolean {
-  if (depth > 5 || val === null || val === undefined) return false;
+export function isInvalidReactObject(val: unknown, depth = 0): boolean {
+  if (depth > 6 || val === null || val === undefined) return false;
   if (typeof val === "function") return true;
   if (typeof val !== "object") return false;
   const obj = val as Record<string, unknown>;
   if ("$$typeof" in obj || "_owner" in obj) return true;
   if (Array.isArray(val)) {
-    return val.some(item => containsReactComponentOrElement(item, depth + 1));
+    return val.some(item => isInvalidReactObject(item, depth + 1));
   }
   for (const [k, v] of Object.entries(obj)) {
-    if (k === "icon" || k === "Icon" || k === "component" || k === "element") {
+    if (
+      (k === "icon" || k === "Icon" || k === "component" || k === "element") &&
+      v !== null &&
+      typeof v === "object"
+    ) {
       return true;
     }
-    if (containsReactComponentOrElement(v, depth + 1)) return true;
-  }
-  return false;
-}
-
-function hasCorruptedIconField(val: unknown, depth = 0): boolean {
-  if (depth > 5 || !val || typeof val !== "object") return false;
-  if (Array.isArray(val)) {
-    return val.some(item => hasCorruptedIconField(item, depth + 1));
-  }
-  const obj = val as Record<string, unknown>;
-  if ("$$typeof" in obj || "_owner" in obj) return true;
-  if ("icon" in obj || "Icon" in obj || "component" in obj || "element" in obj) {
-    return true;
-  }
-  for (const v of Object.values(obj)) {
-    if (hasCorruptedIconField(v, depth + 1)) return true;
+    if (isInvalidReactObject(v, depth + 1)) return true;
   }
   return false;
 }
@@ -64,12 +52,24 @@ export function sanitizeSyncValue<T>(val: T, fallback?: T): T {
   if (val === null || val === undefined) {
     return (fallback !== undefined ? fallback : val) as T;
   }
-  if (containsReactComponentOrElement(val)) {
+  if (typeof val === "function") {
     return (fallback !== undefined ? fallback : undefined) as T;
+  }
+  if (typeof val === "object" && !Array.isArray(val)) {
+    const obj = val as Record<string, unknown>;
+    if ("$$typeof" in obj || "_owner" in obj) {
+      return (fallback !== undefined ? fallback : undefined) as T;
+    }
   }
   if (Array.isArray(val)) {
     const cleaned = val
-      .filter(item => !containsReactComponentOrElement(item))
+      .filter(item => {
+        if (typeof item === "function") return false;
+        if (item && typeof item === "object" && ("$$typeof" in item || "_owner" in item)) {
+          return false;
+        }
+        return true;
+      })
       .map(item => sanitizeSyncValue(item));
     return cleaned as unknown as T;
   }
@@ -77,8 +77,15 @@ export function sanitizeSyncValue<T>(val: T, fallback?: T): T {
     const src = val as Record<string, unknown>;
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(src)) {
-      if (k === "icon" || k === "Icon" || k === "component" || k === "element") continue;
-      if (containsReactComponentOrElement(v)) continue;
+      if (
+        (k === "icon" || k === "Icon" || k === "component" || k === "element") &&
+        v !== null &&
+        typeof v === "object"
+      ) {
+        continue;
+      }
+      if (typeof v === "function") continue;
+      if (v && typeof v === "object" && ("$$typeof" in v || "_owner" in v)) continue;
       if (
         (k === "name" ||
           k === "playerName" ||
@@ -125,7 +132,7 @@ export function purgeCorruptedLocalStorage(): void {
       if (!raw || (!raw.startsWith("{") && !raw.startsWith("["))) continue;
       try {
         const parsed = JSON.parse(raw);
-        if (hasCorruptedIconField(parsed)) {
+        if (isInvalidReactObject(parsed)) {
           keysToRemove.push(key);
         }
       } catch {
@@ -140,7 +147,6 @@ export function purgeCorruptedLocalStorage(): void {
   }
 }
 
-// Executa limpeza imediatamente ao importar o modulo (antes do primeiro render do React)
 purgeCorruptedLocalStorage();
 
 function collectLocalStateSnapshot(): Record<string, unknown> {
@@ -153,7 +159,7 @@ function collectLocalStateSnapshot(): Record<string, unknown> {
       if (raw !== null) {
         try {
           const parsed = JSON.parse(raw);
-          if (hasCorruptedIconField(parsed)) continue;
+          if (isInvalidReactObject(parsed)) continue;
           snapshot[key] = sanitizeSyncValue(parsed);
         } catch {
           snapshot[key] = raw;
@@ -350,6 +356,7 @@ async function upsertNormalizedTables(primary: Record<string, unknown>): Promise
 
 let isPushing = false;
 let isApplyingRemote = false;
+let suppressPushUntil = 0;
 let hasCompletedInitialPull = false;
 let currentRevision = 0;
 let localWriteLockUntil = 0;
@@ -358,7 +365,7 @@ let localChannel: BroadcastChannel | null = null;
 let realtimeSocket: WebSocket | null = null;
 const tabClientId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-function markLocalDirty(ms = 4500): void {
+function markLocalDirty(ms = 3500): void {
   localWriteLockUntil = Math.max(localWriteLockUntil, Date.now() + ms);
 }
 
@@ -371,6 +378,7 @@ function applySnapshotEverywhere(
   }
   const remoteState = sanitizeSyncValue(rawRemoteState);
   isApplyingRemote = true;
+  suppressPushUntil = Date.now() + 1000;
   try {
     for (const [k, v] of Object.entries(remoteState)) {
       if (
@@ -384,7 +392,7 @@ function applySnapshotEverywhere(
       ) {
         continue;
       }
-      if (hasCorruptedIconField(v)) continue;
+      if (isInvalidReactObject(v)) continue;
       const serialized = typeof v === "string" ? v : JSON.stringify(v);
       if (window.localStorage.getItem(k) !== serialized) {
         window.localStorage.setItem(k, serialized);
@@ -449,10 +457,10 @@ export async function pushStateToSupabase(
   explicitLiveContext?: Record<string, unknown>,
   forcePush = false
 ): Promise<boolean> {
-  if (isApplyingRemote) return false;
+  if (isApplyingRemote || Date.now() < suppressPushUntil) return false;
   if (!hasCompletedInitialPull && !forcePush) return false;
 
-  markLocalDirty(4500);
+  markLocalDirty(3500);
 
   if (explicitLiveContext && Object.keys(explicitLiveContext).length > 0) {
     lastKnownLiveContext = sanitizeSyncValue(explicitLiveContext);
@@ -497,7 +505,7 @@ export async function pushStateToSupabase(
       if (primary) {
         await upsertNormalizedTables(primary);
       }
-      localWriteLockUntil = Date.now() + 1200;
+      localWriteLockUntil = Date.now() + 900;
       return true;
     }
     return false;
@@ -682,17 +690,17 @@ export function initSupabaseRealtimeSync(): void {
 
   window.localStorage.setItem = (key: string, value: string) => {
     origSetItem(key, value);
-    if (isApplyingRemote || key === SYNC_META_KEY || isUiNavigationKey(key)) return;
-    markLocalDirty(4500);
+    if (isApplyingRemote || Date.now() < suppressPushUntil || key === SYNC_META_KEY || isUiNavigationKey(key)) return;
+    markLocalDirty(3500);
     if (!hasCompletedInitialPull) return;
     if (debounceTimer) window.clearTimeout(debounceTimer);
     debounceTimer = window.setTimeout(() => {
       void pushStateToSupabase();
-    }, 120);
+    }, 100);
   };
 
   connectSupabaseRealtimeWebSocket();
   window.setInterval(() => {
     void pullStateFromSupabase(false);
-  }, 2000);
+  }, 1500);
 }

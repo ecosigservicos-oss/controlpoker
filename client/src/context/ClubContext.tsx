@@ -1,4 +1,4 @@
-import { containsReactComponentOrElement, initSupabaseRealtimeSync, pushStateToSupabase, sanitizeSyncValue } from "@/lib/supabaseSync";
+import { initSupabaseRealtimeSync, isInvalidReactObject, pushStateToSupabase, sanitizeSyncValue } from "@/lib/supabaseSync";
 import { useRef, createContext, useContext, useEffect, useState, type ReactNode  } from "react";
 import {
   DEFAULT_BLIND_LEVELS,
@@ -184,15 +184,16 @@ useEffect(() => {
     }, 150);
     return () => window.clearTimeout(timer);
   }, [transactions, activities, blindLevels, rules, tournaments, savedPlayers]);
-  // Sincronizacao segura: ignora estados com componentes/icones React (previne React error #130)
+  // Sincronizacao segura v8: atualiza TV e PC automaticamente sem eco de gravacao
   const didMountSyncRef = useRef(false);
+  const suppressRemoteEchoUntilRef = useRef(0);
 
   const applySafeRemoteValue = <T,>(prev: T, rawIncoming: unknown): T => {
     if (
       rawIncoming === undefined ||
       rawIncoming === null ||
-      containsReactComponentOrElement(prev) ||
-      containsReactComponentOrElement(rawIncoming)
+      isInvalidReactObject(prev) ||
+      isInvalidReactObject(rawIncoming)
     ) {
       return prev;
     }
@@ -227,6 +228,7 @@ useEffect(() => {
       const detail = (ev as CustomEvent<{ liveContext?: Record<string, unknown> }>).detail;
       const live = detail?.liveContext;
       if (!live || typeof live !== "object") return;
+      suppressRemoteEchoUntilRef.current = Date.now() + 1000;
       if ("transactions" in live && live["transactions"] !== undefined) { setTransactions(prev => applySafeRemoteValue(prev, live["transactions"])); }
       if ("activities" in live && live["activities"] !== undefined) { setActivities(prev => applySafeRemoteValue(prev, live["activities"])); }
       if ("blindLevels" in live && live["blindLevels"] !== undefined) { setBlindLevels(prev => applySafeRemoteValue(prev, live["blindLevels"])); }
@@ -246,15 +248,15 @@ useEffect(() => {
       didMountSyncRef.current = true;
       return;
     }
+    if (Date.now() < suppressRemoteEchoUntilRef.current) {
+      return;
+    }
     const timer = window.setTimeout(() => {
+      if (Date.now() < suppressRemoteEchoUntilRef.current) return;
       void pushStateToSupabase({ transactions, activities, blindLevels, rules, tournaments, savedPlayers });
-    }, 150);
+    }, 120);
     return () => window.clearTimeout(timer);
   }, [transactions, activities, blindLevels, rules, tournaments, savedPlayers]);
-
-
-
-
 
 return (
     <ClubContext.Provider
