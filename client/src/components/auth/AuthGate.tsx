@@ -1,14 +1,158 @@
-﻿import { useEffect, useState, type ReactNode } from "react";
-import { Lock, LogOut, ShieldCheck, User, Users } from "lucide-react";
+﻿import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  ChevronUp,
+  Lock,
+  LogOut,
+  ShieldCheck,
+  User,
+  Users,
+} from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { APP_MODULES } from "@/types/auth";
 import { LoginScreen } from "@/components/auth/LoginScreen";
 import { AccessManagerModal } from "@/components/auth/AccessManagerModal";
 
+function getInitials(name: string): string {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return "US";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 export function AuthGate({ children }: { children: ReactNode }) {
   const { currentUser, isAdmin, users, logout } = useAuth();
   const [accessModalOpen, setAccessModalOpen] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<{ left: number; bottom: number; width: number }>({
+    left: 14,
+    bottom: 86,
+    width: 248,
+  });
   const [restrictedScreenDetected, setRestrictedScreenDetected] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (menuRef.current && menuRef.current.contains(target)) return;
+      if (target.closest("[data-sidebar-user-trigger='true']")) return;
+      setProfileMenuOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProfileMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [profileMenuOpen]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setProfileMenuOpen(false);
+      return;
+    }
+
+    const bindBottomSidebarCard = () => {
+      const sidebar =
+        document.querySelector<HTMLElement>("aside") ??
+        document.querySelector<HTMLElement>(".sidebar");
+      if (!sidebar) return;
+
+      const allElements = Array.from(sidebar.querySelectorAll<HTMLElement>("*"));
+      const clubTitleEl = allElements.find(el => {
+        if (el.children.length > 0) return false;
+        const txt = (el.textContent ?? "").trim();
+        return txt === "Poker Club SP" || el.dataset.authUserTitle === "true";
+      });
+
+      const subTitleEl = allElements.find(el => {
+        if (el.children.length > 0) return false;
+        const txt = (el.textContent ?? "").trim();
+        return (
+          txt.includes("Unidade principal") ||
+          txt.includes("Admin ·") ||
+          el.dataset.authUserSubtitle === "true"
+        );
+      });
+
+      const anchorEl = clubTitleEl ?? subTitleEl;
+      if (!anchorEl) return;
+
+      if (clubTitleEl) {
+        clubTitleEl.dataset.authUserTitle = "true";
+        clubTitleEl.textContent = isAdmin ? "Poker Club SP" : currentUser.name;
+      }
+      if (subTitleEl) {
+        subTitleEl.dataset.authUserSubtitle = "true";
+        subTitleEl.textContent = isAdmin
+          ? "Admin · Unidade principal"
+          : `${currentUser.jobTitle} · Restrito`;
+      }
+
+      let triggerEl: HTMLElement | null =
+        anchorEl.closest("button, [role='button']") ?? anchorEl.parentElement;
+
+      if (triggerEl && triggerEl.parentElement && triggerEl.parentElement !== sidebar) {
+        const parentRect = triggerEl.parentElement.getBoundingClientRect();
+        if (parentRect.height > 40 && parentRect.height < 110 && parentRect.width > 150) {
+          triggerEl = triggerEl.parentElement;
+        }
+      }
+
+      if (!triggerEl) return;
+
+      const badgeEl = Array.from(triggerEl.querySelectorAll<HTMLElement>("*")).find(el => {
+        if (el.children.length > 0) return false;
+        const txt = (el.textContent ?? "").trim();
+        return (txt.length === 2 && /^[A-ZÀ-Ú]{2}$/.test(txt)) || el.dataset.authUserBadge === "true";
+      });
+      if (badgeEl) {
+        badgeEl.dataset.authUserBadge = "true";
+        badgeEl.textContent = isAdmin ? "AD" : getInitials(currentUser.name);
+      }
+
+      triggerEl.style.cursor = "pointer";
+      triggerEl.setAttribute("data-sidebar-user-trigger", "true");
+      triggerEl.title = isAdmin
+        ? "Gerenciar usuários, acessos ou sair"
+        : "Opções da conta / Sair";
+
+      if (triggerEl.dataset.authClickBound !== "true") {
+        triggerEl.dataset.authClickBound = "true";
+        triggerEl.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          const rect = triggerEl!.getBoundingClientRect();
+          setMenuAnchor({
+            left: Math.max(10, rect.left),
+            bottom: Math.max(16, window.innerHeight - rect.top + 8),
+            width: Math.max(244, rect.width),
+          });
+          setProfileMenuOpen(prev => !prev);
+        });
+      }
+    };
+
+    bindBottomSidebarCard();
+
+    const observer = new MutationObserver(() => {
+      bindBottomSidebarCard();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return () => observer.disconnect();
+  }, [currentUser, isAdmin]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -51,6 +195,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
       let firstAllowedNavElement: HTMLElement | null = null;
 
       navButtons.forEach(el => {
+        if (el.getAttribute("data-sidebar-user-trigger") === "true") return;
+
         const rawText = (el.textContent ?? "").trim().toLowerCase();
         if (!rawText) return;
 
@@ -113,105 +259,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   return (
     <>
-      <div
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 45,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          padding: "8px 18px",
-          background: "#071E36",
-          borderBottom: "1px solid rgba(0, 168, 198, 0.28)",
-          color: "#F8FAFC",
-          flexWrap: "wrap",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-              padding: "3px 10px",
-              borderRadius: 999,
-              background: isAdmin
-                ? "rgba(0, 168, 198, 0.2)"
-                : "rgba(148, 163, 184, 0.16)",
-              border: isAdmin
-                ? "1px solid rgba(56, 189, 248, 0.45)"
-                : "1px solid rgba(148, 163, 184, 0.3)",
-              color: isAdmin ? "#38BDF8" : "#CBD5E1",
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: "0.04em",
-            }}
-          >
-            {isAdmin ? <ShieldCheck size={13} /> : <User size={13} />}
-            {isAdmin ? "ADMINISTRADOR · ACESSO TOTAL" : "ACESSO RESTRITO"}
-          </span>
-
-          <span style={{ fontSize: 13, fontWeight: 600, color: "#FFFFFF" }}>
-            {currentUser.name}
-          </span>
-
-          <span style={{ fontSize: 12, color: "#94A3B8" }}>
-            · {currentUser.jobTitle}
-            {!isAdmin && ` (${currentUser.allowedModules.length} áreas liberadas)`}
-          </span>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => setAccessModalOpen(true)}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "6px 12px",
-                borderRadius: 9,
-                border: "1px solid rgba(56, 189, 248, 0.5)",
-                background: "rgba(0, 168, 198, 0.2)",
-                color: "#7DD3FC",
-                fontSize: 12.5,
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-            >
-              <Users size={14} /> Usuários e Acessos ({users.length})
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={logout}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "6px 12px",
-              borderRadius: 9,
-              border: "1px solid rgba(248, 113, 113, 0.4)",
-              background: "rgba(239, 68, 68, 0.14)",
-              color: "#FCA5A5",
-              fontSize: 12.5,
-              fontWeight: 700,
-              cursor: "pointer",
-            }}
-          >
-            <LogOut size={14} /> Sair
-          </button>
-        </div>
-      </div>
-
       {restrictedScreenDetected && !isAdmin ? (
         <div
           style={{
-            minHeight: "calc(100vh - 46px)",
+            minHeight: "100vh",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -271,6 +322,119 @@ export function AuthGate({ children }: { children: ReactNode }) {
         </div>
       ) : (
         children
+      )}
+
+      {profileMenuOpen && (
+        <div
+          ref={menuRef}
+          style={{
+            position: "fixed",
+            left: menuAnchor.left,
+            bottom: menuAnchor.bottom,
+            width: Math.max(252, menuAnchor.width),
+            zIndex: 70,
+            background: "#0B2540",
+            border: "1px solid rgba(56, 189, 248, 0.35)",
+            borderRadius: 14,
+            padding: 12,
+            boxShadow: "0 20px 45px rgba(2, 10, 22, 0.72)",
+            color: "#F8FAFC",
+          }}
+        >
+          <div
+            style={{
+              padding: "6px 8px 10px",
+              borderBottom: "1px solid rgba(148, 163, 184, 0.16)",
+              marginBottom: 8,
+            }}
+          >
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                padding: "2px 8px",
+                borderRadius: 999,
+                background: isAdmin
+                  ? "rgba(0, 168, 198, 0.22)"
+                  : "rgba(148, 163, 184, 0.18)",
+                color: isAdmin ? "#38BDF8" : "#CBD5E1",
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.04em",
+                marginBottom: 6,
+              }}
+            >
+              {isAdmin ? <ShieldCheck size={11} /> : <User size={11} />}
+              {isAdmin ? "ADMINISTRADOR · ACESSO TOTAL" : "ACESSO RESTRITO"}
+            </div>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: "#FFFFFF" }}>
+              {currentUser.name}
+            </div>
+            <div style={{ fontSize: 11.5, color: "#94A3B8", marginTop: 2 }}>
+              {currentUser.jobTitle}
+              {!isAdmin && ` · ${currentUser.allowedModules.length} áreas liberadas`}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 6 }}>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => {
+                  setProfileMenuOpen(false);
+                  setAccessModalOpen(true);
+                }}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  padding: "9px 10px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(56, 189, 248, 0.35)",
+                  background: "rgba(0, 168, 198, 0.18)",
+                  color: "#7DD3FC",
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <Users size={15} /> Usuários e Acessos ({users.length})
+                </span>
+                <ChevronUp size={14} />
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setProfileMenuOpen(false);
+                logout();
+              }}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "9px 10px",
+                borderRadius: 10,
+                border: "1px solid rgba(248, 113, 113, 0.32)",
+                background: "rgba(239, 68, 68, 0.14)",
+                color: "#FCA5A5",
+                fontSize: 12.5,
+                fontWeight: 700,
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              <LogOut size={15} /> Sair / Trocar usuário
+            </button>
+          </div>
+        </div>
       )}
 
       {isAdmin && (
