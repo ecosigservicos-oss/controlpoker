@@ -341,9 +341,6 @@ function _Legacy_TvView({ mode }: { mode: "clock" | "draw" }) {
   );
 }
 
-export { TvDrawView as TvView } from "@/pages/views/TvDrawView";
-
-
 
 export function TvView({ mode = "draw" }: { mode?: "clock" | "draw" }) {
   if (mode === "clock") {
@@ -351,3 +348,5 @@ export function TvView({ mode = "draw" }: { mode?: "clock" | "draw" }) {
   }
   return <TvDrawInner />;
 }
+
+

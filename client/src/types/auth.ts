@@ -105,7 +105,7 @@ export const APP_MODULES: AppModuleInfo[] = [
     description: "Pontuação e classificação da temporada.",
   },
   {
-    key: "tv-clock", "tv-draw",
+    key: "tv-draw",
     label: "Sorteios / Clocker (Modo TV)",
     sidebarLabels: ["Sorteios (Modo TV)", "Clocker (Modo TV)"],
     category: "Operação",
@@ -175,4 +175,5 @@ export const ROLE_PRESETS: {
     modules: ["tv-clock", "tv-draw", "blinds", "ranking"],
   },
 ];
+
 
