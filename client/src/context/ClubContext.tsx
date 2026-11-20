@@ -1,4 +1,4 @@
-import { initSupabaseRealtimeSync, pushStateToSupabase } from "@/lib/supabaseSync";
+import { initSupabaseRealtimeSync, isSerializedReactElement, pushStateToSupabase, sanitizeSyncValue } from "@/lib/supabaseSync";
 import { useRef, createContext, useContext, useEffect, useState, type ReactNode  } from "react";
 import {
   DEFAULT_BLIND_LEVELS,
@@ -164,8 +164,46 @@ useEffect(() => {
     }, 150);
     return () => window.clearTimeout(timer);
   }, [view, transactions, activities, selectedTournamentId, toast, blindLevels, rules, tournaments, savedPlayers]);
-  // Sincroniza APENAS dados do clube em tempo real (mantem cada tela/rota independente)
+useEffect(() => {
+    if (!didMountSyncRef.current) {
+      didMountSyncRef.current = true;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void pushStateToSupabase({ transactions, activities, toast, blindLevels, rules, tournaments, savedPlayers });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [transactions, activities, toast, blindLevels, rules, tournaments, savedPlayers]);
+  // Sincronizacao segura com validacao de tipos (previne Minified React error #130)
   const didMountSyncRef = useRef(false);
+
+  const applySafeRemoteValue = <T,>(prev: T, rawIncoming: unknown): T => {
+    if (rawIncoming === undefined || rawIncoming === null || isSerializedReactElement(rawIncoming)) {
+      return prev;
+    }
+    const incoming = sanitizeSyncValue(rawIncoming);
+    if (incoming === undefined || incoming === null) {
+      return prev;
+    }
+    if (Array.isArray(prev)) {
+      if (!Array.isArray(incoming)) return prev;
+      return JSON.stringify(prev) === JSON.stringify(incoming) ? prev : (incoming as unknown as T);
+    }
+    if (typeof prev === "string") {
+      return typeof incoming === "string" ? (incoming as unknown as T) : prev;
+    }
+    if (typeof prev === "number") {
+      return typeof incoming === "number" && !Number.isNaN(incoming) ? (incoming as unknown as T) : prev;
+    }
+    if (typeof prev === "boolean") {
+      return typeof incoming === "boolean" ? (incoming as unknown as T) : prev;
+    }
+    if (prev && typeof prev === "object") {
+      if (typeof incoming !== "object" || Array.isArray(incoming)) return prev;
+      return JSON.stringify(prev) === JSON.stringify(incoming) ? prev : (incoming as unknown as T);
+    }
+    return prev;
+  };
 
   useEffect(() => {
     initSupabaseRealtimeSync();
@@ -174,13 +212,12 @@ useEffect(() => {
       const detail = (ev as CustomEvent<{ liveContext?: Record<string, unknown> }>).detail;
       const live = detail?.liveContext;
       if (!live || typeof live !== "object") return;
-      if ("transactions" in live && live["transactions"] !== undefined) { setTransactions(prev => (JSON.stringify(prev) === JSON.stringify(live["transactions"]) ? prev : (live["transactions"] as never))); }
-      if ("activities" in live && live["activities"] !== undefined) { setActivities(prev => (JSON.stringify(prev) === JSON.stringify(live["activities"]) ? prev : (live["activities"] as never))); }
-      if ("toast" in live && live["toast"] !== undefined) { setToast(prev => (JSON.stringify(prev) === JSON.stringify(live["toast"]) ? prev : (live["toast"] as never))); }
-      if ("blindLevels" in live && live["blindLevels"] !== undefined) { setBlindLevels(prev => (JSON.stringify(prev) === JSON.stringify(live["blindLevels"]) ? prev : (live["blindLevels"] as never))); }
-      if ("rules" in live && live["rules"] !== undefined) { setRules(prev => (JSON.stringify(prev) === JSON.stringify(live["rules"]) ? prev : (live["rules"] as never))); }
-      if ("tournaments" in live && live["tournaments"] !== undefined) { setTournaments(prev => (JSON.stringify(prev) === JSON.stringify(live["tournaments"]) ? prev : (live["tournaments"] as never))); }
-      if ("savedPlayers" in live && live["savedPlayers"] !== undefined) { setSavedPlayers(prev => (JSON.stringify(prev) === JSON.stringify(live["savedPlayers"]) ? prev : (live["savedPlayers"] as never))); }
+      if ("transactions" in live && live["transactions"] !== undefined) { setTransactions(prev => applySafeRemoteValue(prev, live["transactions"])); }
+      if ("activities" in live && live["activities"] !== undefined) { setActivities(prev => applySafeRemoteValue(prev, live["activities"])); }
+      if ("blindLevels" in live && live["blindLevels"] !== undefined) { setBlindLevels(prev => applySafeRemoteValue(prev, live["blindLevels"])); }
+      if ("rules" in live && live["rules"] !== undefined) { setRules(prev => applySafeRemoteValue(prev, live["rules"])); }
+      if ("tournaments" in live && live["tournaments"] !== undefined) { setTournaments(prev => applySafeRemoteValue(prev, live["tournaments"])); }
+      if ("savedPlayers" in live && live["savedPlayers"] !== undefined) { setSavedPlayers(prev => applySafeRemoteValue(prev, live["savedPlayers"])); }
     };
 
     window.addEventListener("pokergestor:supabase-synced", handleRemoteState);
@@ -195,10 +232,11 @@ useEffect(() => {
       return;
     }
     const timer = window.setTimeout(() => {
-      void pushStateToSupabase({ transactions, activities, toast, blindLevels, rules, tournaments, savedPlayers });
+      void pushStateToSupabase({ transactions, activities, blindLevels, rules, tournaments, savedPlayers });
     }, 150);
     return () => window.clearTimeout(timer);
-  }, [transactions, activities, toast, blindLevels, rules, tournaments, savedPlayers]);
+  }, [transactions, activities, blindLevels, rules, tournaments, savedPlayers]);
+
 
 
 

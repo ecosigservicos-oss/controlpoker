@@ -1,5 +1,5 @@
 // Sincronizacao instantanea em tempo real entre PokerGestor e Supabase (PostgreSQL + Realtime)
-// Com protecao contra sobrescrita (race condition) usando revisao monotonica (_rev) e trava de escrita local
+// Inclui sanitizacao automatica contra objetos invalidos no JSX (React error #130) e trava de escrita
 
 export const SUPABASE_URL =
   import.meta.env.VITE_SUPABASE_URL || "https://zwqpykunofoetqwioydy.supabase.co";
@@ -25,10 +25,88 @@ function buildHeaders(extra?: Record<string, string>): Record<string, string> {
   return headers;
 }
 
+export function isSerializedReactElement(val: unknown): boolean {
+  if (!val || typeof val !== "object" || Array.isArray(val)) return false;
+  const obj = val as Record<string, unknown>;
+  if ("$$typeof" in obj) return true;
+  if ("props" in obj && ("type" in obj || "_owner" in obj || "key" in obj)) return true;
+  return false;
+}
+
+export function sanitizeSyncValue<T>(val: T, fallback?: T): T {
+  if (val === null || val === undefined) {
+    return (fallback !== undefined ? fallback : val) as T;
+  }
+  if (isSerializedReactElement(val)) {
+    return (fallback !== undefined ? fallback : undefined) as T;
+  }
+  if (Array.isArray(val)) {
+    const cleaned = val
+      .filter(item => !isSerializedReactElement(item))
+      .map(item => sanitizeSyncValue(item));
+    return cleaned as unknown as T;
+  }
+  if (typeof val === "object") {
+    const src = val as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(src)) {
+      if (isSerializedReactElement(v)) continue;
+      if (
+        (k === "name" ||
+          k === "playerName" ||
+          k === "title" ||
+          k === "description" ||
+          k === "category" ||
+          k === "paymentMethod" ||
+          k === "method" ||
+          k === "status" ||
+          k === "type" ||
+          k === "nickname" ||
+          k === "phone" ||
+          k === "unitName" ||
+          k === "clubName") &&
+        v !== null &&
+        v !== undefined &&
+        typeof v === "object"
+      ) {
+        const nested = v as Record<string, unknown>;
+        out[k] = String(nested.name ?? nested.label ?? nested.title ?? nested.value ?? "");
+        continue;
+      }
+      out[k] = sanitizeSyncValue(v);
+    }
+    return out as unknown as T;
+  }
+  return val;
+}
+
 function isUiNavigationKey(key: string): boolean {
-  return /(?:active_?view|current_?view|active_?page|current_?page|active_?tab|current_?tab|active_?screen|current_?screen|route|sidebar|selected_?tournament|selected_?player|tv_?mode|clock_?mode)/i.test(
+  return /(?:active_?view|current_?view|active_?page|current_?page|active_?tab|current_?tab|active_?screen|current_?screen|route|sidebar|selected_?tournament|selected_?player|tv_?mode|clock_?mode|toast|notification|alert)/i.test(
     key
   );
+}
+
+function sanitizeExistingLocalStorage(): void {
+  try {
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (!key || key === SYNC_META_KEY || key.startsWith("__")) continue;
+      const raw = window.localStorage.getItem(key);
+      if (!raw || (!raw.startsWith("{") && !raw.startsWith("["))) continue;
+      try {
+        const parsed = JSON.parse(raw);
+        const sanitized = sanitizeSyncValue(parsed);
+        const reserialized = JSON.stringify(sanitized);
+        if (reserialized && reserialized !== raw) {
+          window.localStorage.setItem(key, reserialized);
+        }
+      } catch {
+        // Ignore non-JSON values
+      }
+    }
+  } catch {
+    // Ignore storage access errors
+  }
 }
 
 function collectLocalStateSnapshot(): Record<string, unknown> {
@@ -40,7 +118,7 @@ function collectLocalStateSnapshot(): Record<string, unknown> {
       const raw = window.localStorage.getItem(key);
       if (raw !== null) {
         try {
-          snapshot[key] = JSON.parse(raw);
+          snapshot[key] = sanitizeSyncValue(JSON.parse(raw));
         } catch {
           snapshot[key] = raw;
         }
@@ -249,9 +327,10 @@ function markLocalDirty(ms = 4500): void {
 }
 
 function applySnapshotEverywhere(
-  remoteState: Record<string, unknown>,
+  rawRemoteState: Record<string, unknown>,
   updatedAt?: string
 ): void {
+  const remoteState = sanitizeSyncValue(rawRemoteState);
   isApplyingRemote = true;
   try {
     for (const [k, v] of Object.entries(remoteState)) {
@@ -274,11 +353,12 @@ function applySnapshotEverywhere(
       window.localStorage.setItem(SYNC_META_KEY, updatedAt);
     }
 
-    const liveContext =
+    const rawLive =
       (remoteState.__liveContext as Record<string, unknown> | undefined) ??
       (remoteState.__primaryState as Record<string, unknown> | undefined) ??
       findPrimaryStateObject(remoteState);
 
+    const liveContext = rawLive ? sanitizeSyncValue(rawLive) : null;
     if (liveContext) {
       lastKnownLiveContext = liveContext;
     }
@@ -334,7 +414,7 @@ export async function pushStateToSupabase(
   markLocalDirty(4500);
 
   if (explicitLiveContext && Object.keys(explicitLiveContext).length > 0) {
-    lastKnownLiveContext = explicitLiveContext;
+    lastKnownLiveContext = sanitizeSyncValue(explicitLiveContext);
   }
 
   if (isPushing) return false;
@@ -517,6 +597,9 @@ let initialized = false;
 export function initSupabaseRealtimeSync(): void {
   if (initialized || typeof window === "undefined") return;
   initialized = true;
+
+  // Limpa imediatamente qualquer objeto corrompido salvo anteriormente no localStorage antes do React renderizar
+  sanitizeExistingLocalStorage();
 
   void pullStateFromSupabase(true);
 
