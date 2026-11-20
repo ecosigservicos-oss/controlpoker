@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import {
+  Eraser,
   LayoutGrid,
   Minus,
   Plus,
@@ -34,11 +35,22 @@ function shuffleArray<T>(items: T[]): T[] {
 function buildBalancedTableDraw(
   players: string[],
   tableCount: number,
-  seatsPerTable: number
+  seatsPerTable: number,
+  clearSeats = false
 ): TableDraw[] {
   const safeSeats = Math.max(2, Math.min(12, seatsPerTable));
   const minTablesNeeded = Math.max(1, Math.ceil(players.length / safeSeats));
   const safeTables = Math.max(minTablesNeeded, Math.min(30, tableCount));
+
+  if (clearSeats) {
+    return Array.from({ length: safeTables }, (_, idx) => ({
+      tableNumber: idx + 1,
+      seats: Array.from({ length: safeSeats }, (_, sIdx) => ({
+        seatNumber: sIdx + 1,
+        playerName: null,
+      })),
+    }));
+  }
 
   const shuffledPlayers = shuffleArray(players);
   const buckets: string[][] = Array.from({ length: safeTables }, () => []);
@@ -124,7 +136,8 @@ export function TvDrawView() {
   const [seatsPerTable, setSeatsPerTable] = useState<number>(8);
   const [tableCount, setTableCount] = useState<number>(2);
   const [focusedTable, setFocusedTable] = useState<number | "all">("all");
-  const [drawSeed, setDrawSeed] = useState<number>(0);
+  const [drawSeed, setDrawSeed] = useState<number>(1);
+  const [isCleared, setIsCleared] = useState<boolean>(false);
 
   const minTablesRequired = Math.max(
     1,
@@ -145,20 +158,27 @@ export function TvDrawView() {
 
   const tablesDraw = useMemo(() => {
     void drawSeed;
-    return buildBalancedTableDraw(confirmedPlayers, activeTableCount, seatsPerTable);
-  }, [confirmedPlayers, activeTableCount, seatsPerTable, drawSeed]);
+    return buildBalancedTableDraw(
+      confirmedPlayers,
+      activeTableCount,
+      seatsPerTable,
+      isCleared
+    );
+  }, [confirmedPlayers, activeTableCount, seatsPerTable, drawSeed, isCleared]);
 
   const handleChangeSeatsPerTable = (nextValue: number) => {
     const clamped = Math.max(2, Math.min(12, Math.round(nextValue) || 8));
     setSeatsPerTable(clamped);
     const needed = Math.max(1, Math.ceil(confirmedPlayers.length / clamped));
     setTableCount(needed);
+    setIsCleared(false);
     setDrawSeed(s => s + 1);
   };
 
   const handleChangeTableCount = (nextTables: number) => {
     const clamped = Math.max(minTablesRequired, Math.min(30, Math.round(nextTables) || 1));
     setTableCount(clamped);
+    setIsCleared(false);
     setDrawSeed(s => s + 1);
   };
 
@@ -167,7 +187,12 @@ export function TvDrawView() {
   };
 
   const handleDrawAgain = () => {
+    setIsCleared(false);
     setDrawSeed(s => s + 1);
+  };
+
+  const handleClearSeats = () => {
+    setIsCleared(true);
   };
 
   const visibleTables =
@@ -783,7 +808,28 @@ export function TvDrawView() {
             </div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={handleClearSeats}
+              style={{
+                height: 42,
+                padding: "0 14px",
+                borderRadius: 11,
+                border: "1px solid rgba(148, 163, 184, 0.28)",
+                background: "rgba(15, 23, 42, 0.65)",
+                color: "#CBD5E1",
+                fontSize: 13,
+                fontWeight: 600,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                cursor: "pointer",
+              }}
+            >
+              <Eraser size={14} /> Limpar
+            </button>
+
             <button
               type="button"
               onClick={handleDrawAgain}
@@ -792,20 +838,20 @@ export function TvDrawView() {
                 padding: "0 18px",
                 borderRadius: 11,
                 border: "1.5px solid #00A8C6",
-                background: "rgba(0, 168, 198, 0.2)",
-                color: "#7DD3FC",
+                background: "#00C8E8",
+                color: "#041627",
                 fontSize: 13.5,
-                fontWeight: 700,
+                fontWeight: 800,
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 8,
                 cursor: "pointer",
-                boxShadow: "0 6px 20px rgba(0, 168, 198, 0.2)",
+                boxShadow: "0 6px 22px rgba(0, 200, 232, 0.35)",
               }}
             >
               <Sparkles size={15} />
               <Shuffle size={15} />
-              Sortear novamente
+              {isCleared ? "Sortear assentos" : "Sortear novamente"}
             </button>
           </div>
         </div>

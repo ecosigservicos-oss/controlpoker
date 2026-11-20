@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DEFAULT_BLIND_LEVELS, getTournamentTotals } from "@/types/club";
 
-export function TvView({ mode }: { mode: "clock" | "draw" }) {
+function _Legacy_TvView({ mode }: { mode: "clock" | "draw" }) {
   const { setView, activeTournament: tournament, setTournaments, blindLevels, rules } = useClub();
 
   const [levelIndex, setLevelIndex] = useState(0);
@@ -339,3 +339,6 @@ export function TvView({ mode }: { mode: "clock" | "draw" }) {
     </div>
   );
 }
+
+export { TvDrawView as TvView } from "@/pages/views/TvDrawView";
+
