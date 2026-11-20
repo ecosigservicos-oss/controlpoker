@@ -23,6 +23,7 @@ import {
   Play,
   Plus,
   ReceiptText,
+  RotateCcw,
   Search,
   Settings2,
   ShieldCheck,
@@ -149,6 +150,7 @@ type TournamentRegistration = {
   playerName: string;
   entryType: EntryType;
   value: number;
+  chips?: string;
   payment: string;
   time: string;
 };
@@ -157,7 +159,18 @@ type BlindLevel = {
   level: number;
   sb: number;
   bb: number;
-  ante: number;
+  ante?: number;
+};
+
+type TournamentRulesConfig = {
+  buyInValue: number;
+  buyInChips: string;
+  buyInBbNote: string;
+  rebuyValue: number;
+  rebuyChips: string;
+  addonValue: number;
+  addonChips: string;
+  addonBbNote: string;
 };
 
 type Tournament = {
@@ -166,6 +179,8 @@ type Tournament = {
   date: string;
   time: string;
   buyIn: number;
+  rebuyValue?: number;
+  addonValue?: number;
   guaranteed: number;
   stack: string;
   blindMinutes: number;
@@ -176,19 +191,42 @@ type Tournament = {
 };
 
 const DEFAULT_BLIND_LEVELS: BlindLevel[] = [
-  { level: 1, sb: 100, bb: 200, ante: 200 },
-  { level: 2, sb: 150, bb: 300, ante: 300 },
-  { level: 3, sb: 200, bb: 400, ante: 400 },
-  { level: 4, sb: 300, bb: 600, ante: 600 },
-  { level: 5, sb: 400, bb: 800, ante: 800 },
-  { level: 6, sb: 500, bb: 1000, ante: 1000 },
-  { level: 7, sb: 800, bb: 1600, ante: 1600 },
-  { level: 8, sb: 1000, bb: 2000, ante: 2000 },
-  { level: 9, sb: 1500, bb: 3000, ante: 3000 },
-  { level: 10, sb: 2000, bb: 4000, ante: 4000 },
+  { level: 1, sb: 50, bb: 100 },
+  { level: 2, sb: 100, bb: 150 },
+  { level: 3, sb: 150, bb: 200 },
+  { level: 4, sb: 200, bb: 250 },
+  { level: 5, sb: 250, bb: 300 },
+  { level: 6, sb: 300, bb: 400 },
+  { level: 7, sb: 400, bb: 500 },
+  { level: 8, sb: 500, bb: 600 },
+  { level: 9, sb: 600, bb: 700 },
+  { level: 10, sb: 700, bb: 800 },
+  { level: 11, sb: 800, bb: 900 },
+  { level: 12, sb: 900, bb: 1000 },
+  { level: 13, sb: 1000, bb: 1100 },
+  { level: 14, sb: 1100, bb: 1200 },
+  { level: 15, sb: 1200, bb: 1300 },
+  { level: 16, sb: 1300, bb: 1400 },
+  { level: 17, sb: 1400, bb: 1500 },
+  { level: 18, sb: 1500, bb: 1600 },
+  { level: 19, sb: 1600, bb: 1700 },
+  { level: 20, sb: 1700, bb: 1800 },
 ];
 
+const DEFAULT_TOURNAMENT_RULES: TournamentRulesConfig = {
+  buyInValue: 30,
+  buyInChips: "15.000",
+  buyInBbNote: "150bb",
+  rebuyValue: 30,
+  rebuyChips: "15.000",
+  addonValue: 40,
+  addonChips: "20.000",
+  addonBbNote: "33,33bb",
+};
+
 const TOURNAMENTS_STORAGE_KEY = "controlpoker_tournaments_v1";
+const BLINDS_STORAGE_KEY = "controlpoker_blinds_v1";
+const RULES_STORAGE_KEY = "controlpoker_rules_v1";
 
 const chartData: { day: string; torneios: number; cash: number }[] = [];
 const cashChartData: { day: string; entrada: number; saida: number }[] = [];
@@ -318,6 +356,338 @@ function FinanceView({ transactions, setTransactions, activities, setActivities 
   return <><PageIntro eyebrow="Controle de caixa e performance" title="Gestão financeira" description="Entradas, saídas e resultado do clube em tempo real." action={() => setModalOpen(true)} actionLabel="Nova transação" /><div className="metrics-grid finance-metrics"><MetricCard label="Entradas" value={compactBrl(entries)} change="0%" detail="vs. período anterior" icon={ArrowDownRight} tone="green" /><MetricCard label="Saídas" value={compactBrl(exits)} change="0%" detail="vs. período anterior" icon={ArrowUpRight} tone="red" /><MetricCard label="Lucro" value={compactBrl(entries - exits)} change="0%" detail="margem de 0%" icon={BarChart3} tone="cyan" /><MetricCard label="Despesas" value={compactBrl(exits)} change="0%" detail="sem registros" icon={ReceiptText} tone="orange" /><MetricCard label="Caixa" value={compactBrl(entries - exits)} detail="saldo disponível" icon={Landmark} tone="purple" /></div><section className="panel finance-chart-panel"><div className="panel-heading"><div><h2>Evolução das entradas e saídas</h2><p>Visão consolidada dos últimos 7 meses.</p></div><div className="segmented-control">{["Mensal", "Semanal", "Diário"].map(item => <button key={item} className={grouping === item ? "segmented-active" : ""} onClick={() => setGrouping(item)}>{item}</button>)}</div></div><div className="chart-wrap finance-chart-wrap"><ResponsiveContainer width="100%" height="100%"><AreaChart data={cashChartData} margin={{ top: 12, right: 10, left: -20, bottom: 0 }}><defs><linearGradient id="entradaGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#071E36" stopOpacity={0.2} /><stop offset="100%" stopColor="#071E36" stopOpacity={0.01} /></linearGradient><linearGradient id="saidaGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#00A8C6" stopOpacity={0.25} /><stop offset="100%" stopColor="#00A8C6" stopOpacity={0.01} /></linearGradient></defs><CartesianGrid stroke="#E7EDF3" vertical={false} /><XAxis dataKey="day" tick={{ fontSize: 11, fill: "#8190A5" }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 11, fill: "#8190A5" }} axisLine={false} tickLine={false} tickFormatter={value => `${value / 1000}k`} /><RechartsTooltip formatter={(value: number) => brl(value)} contentStyle={{ borderRadius: 12, border: "1px solid #E2E8F0" }} /><Area type="monotone" dataKey="entrada" name="Entradas" stroke="#071E36" strokeWidth={2.5} fill="url(#entradaGradient)" /><Area type="monotone" dataKey="saida" name="Saídas" stroke="#00A8C6" strokeWidth={2.5} fill="url(#saidaGradient)" /></AreaChart></ResponsiveContainer></div></section><section className="panel transactions-panel"><div className="panel-heading"><div><h2>Últimas transações</h2><p>Registros financeiros mais recentes.</p></div><button className="text-button" onClick={() => setModalOpen(true)}>+ Nova transação</button></div><div className="transaction-table"><div className="transaction-row transaction-head"><span>Data</span><span>Descrição</span><span>Categoria</span><span>Tipo</span><span>Valor</span><span>Pagamento</span><span /></div>{transactions.length ? transactions.slice(0, 6).map(transaction => <div className="transaction-row" key={transaction.id}><span className="table-date">{transaction.date}</span><span className="transaction-description"><IconTile icon={transaction.icon} tone={transaction.tone} /><strong>{transaction.description}</strong></span><span><StatusBadge tone="neutral" dot={false}>{transaction.category}</StatusBadge></span><span><StatusBadge tone={transaction.type === "Entrada" ? "green" : "red"}>{transaction.type}</StatusBadge></span><strong className={transaction.type === "Entrada" ? "money-in" : "money-out"}>{transaction.type === "Entrada" ? "+" : "-"} {brl(transaction.value)}</strong><span className="payment-method"><CreditCard size={13} /> {transaction.payment}</span><button className="icon-button"><Ellipsis size={17} /></button></div>) : <div className="empty-inline">Nenhuma transação registrada.</div>}</div></section>{modalOpen && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setModalOpen(false); }}><form className="modal-card" onSubmit={handleSubmit}><div className="modal-heading"><div><div className="eyebrow">Lançamento manual</div><h2>Nova transação</h2><p>Registre uma entrada ou saída no caixa.</p></div><button type="button" className="icon-button" onClick={() => setModalOpen(false)}><X size={18} /></button></div><label>Descrição<input value={description} onChange={event => setDescription(event.target.value)} placeholder="Ex.: Rake Mesa 05" required /></label><div className="form-grid"><label>Valor (R$)<input value={value} onChange={event => setValue(event.target.value)} placeholder="0,00" inputMode="decimal" required /></label><label>Categoria<select value={category} onChange={event => setCategory(event.target.value)}><option>Receitas</option><option>Despesas</option><option>Torneios</option><option>Cash</option><option>Bar</option></select></label></div><label>Tipo<select value={type} onChange={event => setType(event.target.value as "Entrada" | "Saída")}><option>Entrada</option><option>Saída</option></select></label><div className="modal-actions"><Button type="button" variant="outline" onClick={() => setModalOpen(false)}>Cancelar</Button><Button type="submit" className="primary-button">Salvar transação</Button></div></form></div>}</>;
 }
 
+function BlindsStructureView({
+  blindLevels,
+  setBlindLevels,
+  rules,
+  setRules,
+  setView,
+  setToast,
+}: {
+  blindLevels: BlindLevel[];
+  setBlindLevels: React.Dispatch<React.SetStateAction<BlindLevel[]>>;
+  rules: TournamentRulesConfig;
+  setRules: React.Dispatch<React.SetStateAction<TournamentRulesConfig>>;
+  setView: (view: ViewKey) => void;
+  setToast: (message: string) => void;
+}) {
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [newSb, setNewSb] = useState("1800");
+  const [newBb, setNewBb] = useState("2000");
+
+  const [buyInVal, setBuyInVal] = useState(rules.buyInValue.toFixed(2).replace(".", ","));
+  const [buyInChips, setBuyInChips] = useState(rules.buyInChips);
+  const [rebuyVal, setRebuyVal] = useState(rules.rebuyValue.toFixed(2).replace(".", ","));
+  const [rebuyChips, setRebuyChips] = useState(rules.rebuyChips);
+  const [addonVal, setAddonVal] = useState(rules.addonValue.toFixed(2).replace(".", ","));
+  const [addonChips, setAddonChips] = useState(rules.addonChips);
+
+  useEffect(() => {
+    setBuyInVal(rules.buyInValue.toFixed(2).replace(".", ","));
+    setBuyInChips(rules.buyInChips);
+    setRebuyVal(rules.rebuyValue.toFixed(2).replace(".", ","));
+    setRebuyChips(rules.rebuyChips);
+    setAddonVal(rules.addonValue.toFixed(2).replace(".", ","));
+    setAddonChips(rules.addonChips);
+  }, [rules]);
+
+  const half = Math.ceil(blindLevels.length / 2);
+  const leftColumn = blindLevels.slice(0, half);
+  const rightColumn = blindLevels.slice(half);
+
+  const handleAddLevel = (event: FormEvent) => {
+    event.preventDefault();
+    const sb = Math.max(1, Number(newSb) || 0);
+    const bb = Math.max(1, Number(newBb) || 0);
+    const nextLevelNumber = blindLevels.length + 1;
+    setBlindLevels(current => [...current, { level: nextLevelNumber, sb, bb }]);
+    setToast(`Nível ${nextLevelNumber} (${sb}/${bb}) adicionado!`);
+    setEditModalOpen(false);
+  };
+
+  const handleSaveRules = (event: FormEvent) => {
+    event.preventDefault();
+    setRules({
+      ...rules,
+      buyInValue: parseBrlInput(buyInVal),
+      buyInChips: buyInChips.trim() || "15.000",
+      rebuyValue: parseBrlInput(rebuyVal),
+      rebuyChips: rebuyChips.trim() || "15.000",
+      addonValue: parseBrlInput(addonVal),
+      addonChips: addonChips.trim() || "20.000",
+    });
+    setToast("Valores de Buy-in, Rebuy e Add-on atualizados!");
+  };
+
+  const handleResetDefault = () => {
+    setBlindLevels(DEFAULT_BLIND_LEVELS);
+    setRules(DEFAULT_TOURNAMENT_RULES);
+    setToast("Estrutura padrão oficial (20 níveis) restaurada!");
+  };
+
+  return (
+    <>
+      <PageIntro
+        eyebrow="Configuração oficial de torneios"
+        title="Estruturas de Blinds"
+        description="Tabela oficial de blinds (Nível 1 ao 20) e valores de Buy-in, Rebuy e Add-on."
+        action={() => setEditModalOpen(true)}
+        actionLabel="Adicionar nível"
+      />
+
+      <div className="metrics-grid">
+        <MetricCard
+          label="Buy-in"
+          value={brl(rules.buyInValue)}
+          detail={`${rules.buyInChips} fichas (${rules.buyInBbNote})`}
+          icon={CircleDollarSign}
+          tone="cyan"
+        />
+        <MetricCard
+          label="Rebuy"
+          value={brl(rules.rebuyValue)}
+          detail={`${rules.rebuyChips} fichas`}
+          icon={Zap}
+          tone="orange"
+        />
+        <MetricCard
+          label="Add-on"
+          value={brl(rules.addonValue)}
+          detail={`${rules.addonChips} fichas (${rules.addonBbNote})`}
+          icon={Sparkles}
+          tone="gold"
+        />
+        <MetricCard
+          label="Estrutura ativa"
+          value={`${blindLevels.length} níveis`}
+          detail={`${blindLevels[0]?.sb ?? 50}/${blindLevels[0]?.bb ?? 100} até ${blindLevels[blindLevels.length - 1]?.sb ?? 1700}/${blindLevels[blindLevels.length - 1]?.bb ?? 1800}`}
+          icon={Clock3}
+          tone="purple"
+        />
+      </div>
+
+      <section className="panel" style={{ marginBottom: 20 }}>
+        <div className="panel-heading">
+          <div>
+            <h2>Blinds ({blindLevels.length} Níveis)</h2>
+            <p>Esta estrutura é aplicada automaticamente nos torneios e no Clocker (Modo TV).</p>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Button type="button" variant="outline" onClick={handleResetDefault}>
+              <RotateCcw size={14} /> Restaurar padrão
+            </Button>
+            <Button type="button" className="primary-button" onClick={() => setView("tournaments")}>
+              <Trophy size={14} /> Ir para Torneios
+            </Button>
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+            gap: 16,
+            marginTop: 12,
+          }}
+        >
+          {[leftColumn, rightColumn].map((col, colIdx) => (
+            <div
+              key={colIdx}
+              style={{
+                border: "1px solid #E2E8F0",
+                borderRadius: 12,
+                overflow: "hidden",
+                background: "#FFFFFF",
+              }}
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  padding: "10px 16px",
+                  background: "#F8FAFC",
+                  borderBottom: "1px solid #E2E8F0",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "#64748B",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                }}
+              >
+                <span>Nível</span>
+                <span style={{ textAlign: "right" }}>Small / Big Blind</span>
+              </div>
+
+              {col.map((lvl, idx) => (
+                <div
+                  key={lvl.level}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    alignItems: "center",
+                    padding: "11px 16px",
+                    borderBottom: idx === col.length - 1 ? "none" : "1px solid #F1F5F9",
+                    fontSize: 14,
+                  }}
+                >
+                  <span style={{ fontWeight: 600, color: "#0F172A" }}>
+                    Nível {lvl.level}:
+                  </span>
+                  <strong
+                    style={{
+                      textAlign: "right",
+                      color: "#00A8C6",
+                      fontVariantNumeric: "tabular-nums",
+                      fontSize: 15,
+                    }}
+                  >
+                    {lvl.sb}/{lvl.bb}
+                  </strong>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Valores e Fichas do Torneio</h2>
+            <p>Configuração padrão aplicada ao abrir lançamentos de Buy-in, Rebuy e Add-on.</p>
+          </div>
+          <StatusBadge tone="cyan">Configurado</StatusBadge>
+        </div>
+
+        <form onSubmit={handleSaveRules} style={{ display: "grid", gap: 14, marginTop: 12 }}>
+          <div className="form-grid">
+            <label>
+              Valor Buy-in (R$)
+              <input
+                value={buyInVal}
+                onChange={e => setBuyInVal(e.target.value)}
+                inputMode="decimal"
+                required
+              />
+            </label>
+            <label>
+              Fichas Buy-in
+              <input
+                value={buyInChips}
+                onChange={e => setBuyInChips(e.target.value)}
+                placeholder="15.000"
+                required
+              />
+            </label>
+          </div>
+
+          <div className="form-grid">
+            <label>
+              Valor Rebuy (R$)
+              <input
+                value={rebuyVal}
+                onChange={e => setRebuyVal(e.target.value)}
+                inputMode="decimal"
+                required
+              />
+            </label>
+            <label>
+              Fichas Rebuy
+              <input
+                value={rebuyChips}
+                onChange={e => setRebuyChips(e.target.value)}
+                placeholder="15.000"
+                required
+              />
+            </label>
+          </div>
+
+          <div className="form-grid">
+            <label>
+              Valor Add-on (R$)
+              <input
+                value={addonVal}
+                onChange={e => setAddonVal(e.target.value)}
+                inputMode="decimal"
+                required
+              />
+            </label>
+            <label>
+              Fichas Add-on
+              <input
+                value={addonChips}
+                onChange={e => setAddonChips(e.target.value)}
+                placeholder="20.000"
+                required
+              />
+            </label>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Button type="submit" className="primary-button">
+              Salvar valores e fichas
+            </Button>
+          </div>
+        </form>
+      </section>
+
+      {editModalOpen && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setEditModalOpen(false);
+          }}
+        >
+          <form className="modal-card" onSubmit={handleAddLevel}>
+            <div className="modal-heading">
+              <div>
+                <div className="eyebrow">Nível {blindLevels.length + 1}</div>
+                <h2>Adicionar nível de blind</h2>
+                <p>Informe os valores de Small Blind e Big Blind.</p>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setEditModalOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="form-grid">
+              <label>
+                Small Blind
+                <input
+                  type="number"
+                  min={1}
+                  value={newSb}
+                  onChange={e => setNewSb(e.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Big Blind
+                <input
+                  type="number"
+                  min={1}
+                  value={newBb}
+                  onChange={e => setNewBb(e.target.value)}
+                  required
+                />
+              </label>
+            </div>
+
+            <div className="modal-actions">
+              <Button type="button" variant="outline" onClick={() => setEditModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" className="primary-button">
+                Adicionar nível
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
+    </>
+  );
+}
+
 function TournamentsView({
   setView,
   tournaments,
@@ -326,6 +696,8 @@ function TournamentsView({
   setToast,
   selectedId,
   setSelectedId,
+  blindLevels,
+  rules,
   initialTab = "resumo",
 }: {
   setView: (view: ViewKey) => void;
@@ -335,21 +707,23 @@ function TournamentsView({
   setToast: (message: string) => void;
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
+  blindLevels: BlindLevel[];
+  rules: TournamentRulesConfig;
   initialTab?: "resumo" | "blinds" | "premiacao";
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [entryModalOpen, setEntryModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"resumo" | "blinds" | "premiacao">(initialTab);
 
-  // Formulário de criação de torneio
+  // Formulário de criação de torneio (pré-preenchido com R$ 30,00 e 15.000 fichas)
   const [name, setName] = useState("");
   const [date, setDate] = useState("20/11/2026");
   const [time, setTime] = useState("20:00");
-  const [buyIn, setBuyIn] = useState("150,00");
-  const [guaranteed, setGuaranteed] = useState("15.000,00");
-  const [stack, setStack] = useState("25.000");
-  const [blindMinutes, setBlindMinutes] = useState("20");
-  const [capacity, setCapacity] = useState("80");
+  const [buyIn, setBuyIn] = useState(rules.buyInValue.toFixed(2).replace(".", ","));
+  const [guaranteed, setGuaranteed] = useState("0,00");
+  const [stack, setStack] = useState(rules.buyInChips);
+  const [blindMinutes, setBlindMinutes] = useState("15");
+  const [capacity, setCapacity] = useState("30");
   const [status, setStatus] = useState<TournamentStatus>("Agendado");
 
   // Formulário de lançamento (Buy-in / Rebuy / Add-on)
@@ -371,13 +745,34 @@ function TournamentsView({
   const entryTypeTone = (type: EntryType) =>
     type === "Buy-in" ? "cyan" : type === "Rebuy" ? "orange" : "gold";
 
+  const getDefaultValueForEntry = (type: EntryType, trn: Tournament) => {
+    if (type === "Buy-in") return trn.buyIn || rules.buyInValue;
+    if (type === "Rebuy") return trn.rebuyValue ?? rules.rebuyValue;
+    return trn.addonValue ?? rules.addonValue;
+  };
+
+  const getChipsForEntry = (type: EntryType, trn: Tournament) => {
+    if (type === "Buy-in") return trn.stack || rules.buyInChips;
+    if (type === "Rebuy") return rules.rebuyChips;
+    return rules.addonChips;
+  };
+
   const handleOpenEntryModal = () => {
     if (!selectedTournament) return;
     setPlayerName("");
     setEntryType("Buy-in");
-    setEntryValue(selectedTournament.buyIn.toFixed(2).replace(".", ","));
+    const defaultVal = getDefaultValueForEntry("Buy-in", selectedTournament);
+    setEntryValue(defaultVal.toFixed(2).replace(".", ","));
     setEntryPayment("PIX");
     setEntryModalOpen(true);
+  };
+
+  const handleSelectEntryType = (option: EntryType) => {
+    setEntryType(option);
+    if (selectedTournament) {
+      const val = getDefaultValueForEntry(option, selectedTournament);
+      setEntryValue(val.toFixed(2).replace(".", ","));
+    }
   };
 
   const handleCreateTournament = (event: FormEvent) => {
@@ -391,12 +786,14 @@ function TournamentsView({
       date: date.trim() || "20/11/2026",
       time: time.trim() || "20:00",
       buyIn: parseBrlInput(buyIn),
+      rebuyValue: rules.rebuyValue,
+      addonValue: rules.addonValue,
       guaranteed: parseBrlInput(guaranteed),
-      stack: stack.trim() || "25.000",
-      blindMinutes: Math.max(5, Number(blindMinutes) || 20),
+      stack: stack.trim() || rules.buyInChips,
+      blindMinutes: Math.max(5, Number(blindMinutes) || 15),
       status,
       entries: 0,
-      capacity: Math.max(9, Number(capacity) || 80),
+      capacity: Math.max(9, Number(capacity) || 30),
       registrations: [],
     };
 
@@ -406,7 +803,7 @@ function TournamentsView({
       {
         id: `act-${Date.now()}`,
         title: `Torneio "${created.name}" criado`,
-        detail: `Buy-in ${brl(created.buyIn)} · GTD ${brl(created.guaranteed)}`,
+        detail: `Buy-in ${brl(created.buyIn)} · Stack ${created.stack}`,
         time: "agora",
         tone: "purple",
         icon: Trophy,
@@ -425,6 +822,7 @@ function TournamentsView({
     if (!trimmedPlayer) return;
 
     const parsedValue = parseBrlInput(entryValue);
+    const chipsLabel = getChipsForEntry(entryType, selectedTournament);
     const now = new Date();
     const formattedTime = `${String(now.getHours()).padStart(2, "0")}:${String(
       now.getMinutes()
@@ -435,6 +833,7 @@ function TournamentsView({
       playerName: trimmedPlayer,
       entryType,
       value: parsedValue,
+      chips: chipsLabel,
       payment: entryPayment,
       time: formattedTime,
     };
@@ -457,7 +856,7 @@ function TournamentsView({
       {
         id: `act-${Date.now()}`,
         title: `${entryType} de ${trimmedPlayer} (${brl(parsedValue)})`,
-        detail: `${selectedTournament.name} · ${entryPayment}`,
+        detail: `${selectedTournament.name} · ${chipsLabel} fichas · ${entryPayment}`,
         time: "agora",
         tone: entryType === "Buy-in" ? "cyan" : entryType === "Rebuy" ? "green" : "gold",
         icon: Users,
@@ -465,7 +864,7 @@ function TournamentsView({
       ...current,
     ]);
 
-    setToast(`${entryType} registrado para ${trimmedPlayer}!`);
+    setToast(`${entryType} (${chipsLabel} fichas) registrado para ${trimmedPlayer}!`);
     setPlayerName("");
     setEntryModalOpen(false);
   };
@@ -582,13 +981,15 @@ function TournamentsView({
                   <span>{selectedTournament.date} ÀS {selectedTournament.time}</span>
                 </div>
                 <h2>{selectedTournament.name}</h2>
-                <p>Stack inicial de {selectedTournament.stack} fichas · Níveis de {selectedTournament.blindMinutes} minutos</p>
+                <p>
+                  Buy-in {brl(selectedTournament.buyIn)} ({rules.buyInChips} fichas) · Rebuy {brl(selectedTournament.rebuyValue ?? rules.rebuyValue)} ({rules.rebuyChips}) · Add-on {brl(selectedTournament.addonValue ?? rules.addonValue)} ({rules.addonChips})
+                </p>
 
                 <div className="detail-stats">
                   <div>
-                    <span>BUY-IN</span>
+                    <span>BUY-IN / REBUY / ADD-ON</span>
                     <strong>{brl(selectedTournament.buyIn)}</strong>
-                    <small>Entrada principal</small>
+                    <small>Rebuy {brl(rules.rebuyValue)} · Add-on {brl(rules.addonValue)}</small>
                   </div>
                   <div>
                     <span>GARANTIDO</span>
@@ -641,7 +1042,7 @@ function TournamentsView({
                   className={activeTab === "blinds" ? "tab-active" : ""}
                   onClick={() => setActiveTab("blinds")}
                 >
-                  Estrutura de blinds
+                  Estrutura de blinds ({blindLevels.length})
                 </span>
                 <span
                   role="button"
@@ -690,7 +1091,7 @@ function TournamentsView({
                             </StatusBadge>
                           </strong>
                           <small>
-                            Valor: {brl(reg.value)} · Pagamento: {reg.payment}
+                            Valor: {brl(reg.value)} {reg.chips ? `· ${reg.chips} fichas` : ""} · Pagamento: {reg.payment}
                           </small>
                         </p>
                         <time>{reg.time}</time>
@@ -710,12 +1111,12 @@ function TournamentsView({
 
               {activeTab === "blinds" && (
                 <div className="detail-feed">
-                  {DEFAULT_BLIND_LEVELS.map(lvl => (
+                  {blindLevels.map(lvl => (
                     <div key={lvl.level}>
                       <div className="feed-icon"><Clock3 size={15} /></div>
                       <p>
-                        <strong>Nível {String(lvl.level).padStart(2, "0")} — Blinds {lvl.sb} / {lvl.bb}</strong>
-                        <small>Big Blind Ante: {lvl.ante} · Duração: {selectedTournament.blindMinutes} min</small>
+                        <strong>Nível {lvl.level}: {lvl.sb} / {lvl.bb}</strong>
+                        <small>Duração: {selectedTournament.blindMinutes} min</small>
                       </p>
                       <time>{(lvl.level - 1) * selectedTournament.blindMinutes} min</time>
                     </div>
@@ -793,13 +1194,14 @@ function TournamentsView({
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
                 {(["Buy-in", "Rebuy", "Add-on"] as EntryType[]).map(option => {
                   const selected = entryType === option;
+                  const chipsHint = getChipsForEntry(option, selectedTournament);
                   return (
                     <button
                       key={option}
                       type="button"
-                      onClick={() => setEntryType(option)}
+                      onClick={() => handleSelectEntryType(option)}
                       style={{
-                        padding: "10px 12px",
+                        padding: "10px 8px",
                         borderRadius: 10,
                         border: selected ? "2px solid #00A8C6" : "1px solid #D8E1EB",
                         background: selected ? "#00A8C614" : "#FFFFFF",
@@ -809,7 +1211,10 @@ function TournamentsView({
                         textAlign: "center",
                       }}
                     >
-                      {option}
+                      <div>{option}</div>
+                      <small style={{ display: "block", fontSize: 11, opacity: 0.8 }}>
+                        {chipsHint} fichas
+                      </small>
                     </button>
                   );
                 })}
@@ -846,7 +1251,7 @@ function TournamentsView({
                 Cancelar
               </Button>
               <Button type="submit" className="primary-button">
-                Confirmar {entryType}
+                Confirmar {entryType} ({getChipsForEntry(entryType, selectedTournament)} fichas)
               </Button>
             </div>
           </form>
@@ -877,7 +1282,7 @@ function TournamentsView({
               <input
                 value={name}
                 onChange={event => setName(event.target.value)}
-                placeholder="Ex.: Main Event Sexta 15K GTD"
+                placeholder="Ex.: Torneio Universitário"
                 required
               />
             </label>
@@ -909,7 +1314,7 @@ function TournamentsView({
                 <input
                   value={buyIn}
                   onChange={event => setBuyIn(event.target.value)}
-                  placeholder="150,00"
+                  placeholder="30,00"
                   inputMode="decimal"
                   required
                 />
@@ -919,7 +1324,7 @@ function TournamentsView({
                 <input
                   value={guaranteed}
                   onChange={event => setGuaranteed(event.target.value)}
-                  placeholder="15.000,00"
+                  placeholder="0,00"
                   inputMode="decimal"
                   required
                 />
@@ -932,7 +1337,7 @@ function TournamentsView({
                 <input
                   value={stack}
                   onChange={event => setStack(event.target.value)}
-                  placeholder="25.000"
+                  placeholder="15.000"
                   required
                 />
               </label>
@@ -1006,12 +1411,24 @@ function SimpleModule({ view, setView }: { view: ViewKey; setView: (view: ViewKe
   return <><PageIntro eyebrow={current.eyebrow} title={current.title} description={current.description} action={() => setView("overview")} actionLabel="Voltar para visão geral" /><div className="simple-hero"><div className={cn("simple-hero-icon", `icon-${current.accent}`)}><Icon size={30} /></div><div><StatusBadge tone={current.accent === "orange" ? "orange" : current.accent === "gold" ? "gold" : "cyan"}>Módulo conectado</StatusBadge><h2>Dados limpos</h2><p>Este módulo está pronto para receber novos registros. Nenhum dado anterior permanece gravado.</p></div><div className="simple-hero-action"><Button className="primary-button" onClick={() => setView("overview")}>Ver visão geral <ArrowUpRight size={15} /></Button></div></div><div className="simple-stats">{current.stats.map(([label, value, detail]) => <div className="panel simple-stat" key={label}><span className="eyebrow">{label}</span><strong>{value}</strong><small>{detail}</small></div>)}</div><section className="panel empty-state"><div className="empty-orbit"><Icon size={28} /></div><h2>Nenhum registro encontrado</h2><p>O módulo foi limpo e está pronto para uma nova operação.</p><div className="empty-actions"><Button className="primary-button" onClick={() => setView("overview")}><Grid2X2 size={15} /> Voltar ao hub</Button></div></section></>;
 }
 
-function TvView({ mode, setView, tournament }: { mode: "clock" | "draw"; setView: (view: ViewKey) => void; tournament: Tournament | null }) {
+function TvView({
+  mode,
+  setView,
+  tournament,
+  blindLevels,
+}: {
+  mode: "clock" | "draw";
+  setView: (view: ViewKey) => void;
+  tournament: Tournament | null;
+  blindLevels: BlindLevel[];
+}) {
   const [levelIndex, setLevelIndex] = useState(0);
   const [secondsLeft, setSecondsLeft] = useState((tournament?.blindMinutes ?? 15) * 60);
   const [running, setRunning] = useState(false);
   const [seats, setSeats] = useState<string[]>(Array(8).fill(""));
   const [revealed, setRevealed] = useState(false);
+
+  const levels = blindLevels.length > 0 ? blindLevels : DEFAULT_BLIND_LEVELS;
 
   useEffect(() => {
     setSecondsLeft((tournament?.blindMinutes ?? 15) * 60);
@@ -1024,12 +1441,12 @@ function TvView({ mode, setView, tournament }: { mode: "clock" | "draw"; setView
     const timer = window.setInterval(() => {
       setSecondsLeft(prev => {
         if (prev > 1) return prev - 1;
-        setLevelIndex(idx => Math.min(DEFAULT_BLIND_LEVELS.length - 1, idx + 1));
+        setLevelIndex(idx => Math.min(levels.length - 1, idx + 1));
         return (tournament?.blindMinutes ?? 15) * 60;
       });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [running, mode, tournament?.blindMinutes]);
+  }, [running, mode, tournament?.blindMinutes, levels.length]);
 
   if (!tournament) {
     return (
@@ -1065,10 +1482,10 @@ function TvView({ mode, setView, tournament }: { mode: "clock" | "draw"; setView
   const totals = getTournamentTotals(tournament);
 
   if (mode === "clock") {
-    const currentLevel = DEFAULT_BLIND_LEVELS[levelIndex] ?? DEFAULT_BLIND_LEVELS[0];
-    const nextLevel = DEFAULT_BLIND_LEVELS[levelIndex + 1] ?? null;
+    const currentLevel = levels[levelIndex] ?? levels[0];
+    const nextLevel = levels[levelIndex + 1] ?? null;
     const prizePool = Math.max(tournament.guaranteed, totals.collectedTotal);
-    const numericStack = Number(tournament.stack.replace(/\D/g, "")) || 10000;
+    const numericStack = Number(tournament.stack.replace(/\D/g, "")) || 15000;
     const avgStack = totals.buyInsCount > 0 ? numericStack.toLocaleString("pt-BR") : tournament.stack;
 
     return (
@@ -1104,18 +1521,17 @@ function TvView({ mode, setView, tournament }: { mode: "clock" | "draw"; setView
           <div className="clock-center">
             <div className="clock-kicker">
               <span className="neon-line" />
-              <span>NÍVEL {currentLevel.level} DE {DEFAULT_BLIND_LEVELS.length}</span>
+              <span>NÍVEL {currentLevel.level} DE {levels.length}</span>
               <span className="neon-line" />
             </div>
             <div className="clock-time">{formatTime(secondsLeft)}</div>
             <div className="clock-blinds">
               <strong>{currentLevel.sb} / {currentLevel.bb}</strong>
-              <span>BIG BLIND ANTE {currentLevel.ante}</span>
+              <span>SMALL BLIND / BIG BLIND</span>
             </div>
             <div className="next-level">
               <span>PRÓXIMO NÍVEL:</span>
               <b>{nextLevel ? `${nextLevel.sb} / ${nextLevel.bb}` : "NÍVEL FINAL"}</b>
-              <small>{nextLevel ? `(Ante ${nextLevel.ante})` : ""}</small>
             </div>
             <div className="prize-strip">
               <span>PREMIAÇÃO TOTAL</span>
@@ -1163,7 +1579,7 @@ function TvView({ mode, setView, tournament }: { mode: "clock" | "draw"; setView
                 type="button"
                 title="Próximo nível"
                 onClick={() => {
-                  setLevelIndex(i => Math.min(DEFAULT_BLIND_LEVELS.length - 1, i + 1));
+                  setLevelIndex(i => Math.min(levels.length - 1, i + 1));
                   setSecondsLeft(tournament.blindMinutes * 60);
                 }}
               >
@@ -1275,6 +1691,22 @@ export default function Home() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions);
   const [activities, setActivities] = useState<ActivityItem[]>(initialActivities);
+  const [blindLevels, setBlindLevels] = useState<BlindLevel[]>(() => {
+    try {
+      const saved = localStorage.getItem(BLINDS_STORAGE_KEY);
+      return saved ? (JSON.parse(saved) as BlindLevel[]) : DEFAULT_BLIND_LEVELS;
+    } catch {
+      return DEFAULT_BLIND_LEVELS;
+    }
+  });
+  const [rules, setRules] = useState<TournamentRulesConfig>(() => {
+    try {
+      const saved = localStorage.getItem(RULES_STORAGE_KEY);
+      return saved ? (JSON.parse(saved) as TournamentRulesConfig) : DEFAULT_TOURNAMENT_RULES;
+    } catch {
+      return DEFAULT_TOURNAMENT_RULES;
+    }
+  });
   const [tournaments, setTournaments] = useState<Tournament[]>(() => {
     try {
       const saved = localStorage.getItem(TOURNAMENTS_STORAGE_KEY);
@@ -1295,6 +1727,22 @@ export default function Home() {
   }, [tournaments]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(BLINDS_STORAGE_KEY, JSON.stringify(blindLevels));
+    } catch {
+      // ignore storage errors
+    }
+  }, [blindLevels]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(rules));
+    } catch {
+      // ignore storage errors
+    }
+  }, [rules]);
+
+  useEffect(() => {
     if (!toast) return;
     const timeout = window.setTimeout(() => setToast(null), 3200);
     return () => window.clearTimeout(timeout);
@@ -1307,7 +1755,19 @@ export default function Home() {
     if (view === "overview") return <OverviewView setView={setView} activities={activities} tournaments={tournaments} />;
     if (view === "dashboard") return <DashboardView setView={setView} />;
     if (view === "finance") return <FinanceView transactions={transactions} setTransactions={setTransactions} activities={activities} setActivities={setActivities} />;
-    if (view === "tournaments" || view === "satellites" || view === "blinds") {
+    if (view === "blinds") {
+      return (
+        <BlindsStructureView
+          blindLevels={blindLevels}
+          setBlindLevels={setBlindLevels}
+          rules={rules}
+          setRules={setRules}
+          setView={setView}
+          setToast={setToast}
+        />
+      );
+    }
+    if (view === "tournaments" || view === "satellites") {
       return (
         <TournamentsView
           setView={setView}
@@ -1317,15 +1777,17 @@ export default function Home() {
           setToast={setToast}
           selectedId={selectedTournamentId}
           setSelectedId={setSelectedTournamentId}
-          initialTab={view === "blinds" ? "blinds" : "resumo"}
+          blindLevels={blindLevels}
+          rules={rules}
+          initialTab="resumo"
         />
       );
     }
     if (view === "cash") return <CashView setView={setView} />;
-    if (view === "tv-clock") return <TvView mode="clock" setView={setView} tournament={activeTournament} />;
-    if (view === "tv-draw") return <TvView mode="draw" setView={setView} tournament={activeTournament} />;
+    if (view === "tv-clock") return <TvView mode="clock" setView={setView} tournament={activeTournament} blindLevels={blindLevels} />;
+    if (view === "tv-draw") return <TvView mode="draw" setView={setView} tournament={activeTournament} blindLevels={blindLevels} />;
     return <SimpleModule view={view} setView={setView} />;
-  }, [activeTournament, activities, selectedTournamentId, tournaments, transactions, view]);
+  }, [activeTournament, activities, blindLevels, rules, selectedTournamentId, tournaments, transactions, view]);
 
   if (view === "tv-clock" || view === "tv-draw") return content;
   const navigate = (nextView: ViewKey) => { setView(nextView); setMobileOpen(false); };
