@@ -1,4 +1,4 @@
-// Sincronizacao em tempo real entre PokerGestor e Supabase (PostgreSQL)
+// Sincronizacao instantanea em tempo real entre PokerGestor e Supabase (PostgreSQL + Realtime)
 
 export const SUPABASE_URL =
   import.meta.env.VITE_SUPABASE_URL || "https://zwqpykunofoetqwioydy.supabase.co";
@@ -10,6 +10,7 @@ export const SUPABASE_KEY =
 const DEFAULT_CLUB_ID = "default-club";
 const SYNC_META_KEY = "pokergestor_supabase_last_sync_at";
 const SYNC_EVENT_NAME = "pokergestor:supabase-synced";
+const BROADCAST_CHANNEL_NAME = "pokergestor_instant_sync_v1";
 
 function buildHeaders(extra?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = {
@@ -205,6 +206,75 @@ async function upsertNormalizedTables(primary: Record<string, unknown>): Promise
 
 let isPushing = false;
 let isApplyingRemote = false;
+let localChannel: BroadcastChannel | null = null;
+let realtimeSocket: WebSocket | null = null;
+const tabClientId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+function applySnapshotToLocalStorage(
+  remoteState: Record<string, unknown>,
+  updatedAt?: string
+): boolean {
+  let changed = false;
+  isApplyingRemote = true;
+  try {
+    for (const [k, v] of Object.entries(remoteState)) {
+      if (k === "__primaryState" || k === SYNC_META_KEY) continue;
+      const serialized = typeof v === "string" ? v : JSON.stringify(v);
+      if (window.localStorage.getItem(k) !== serialized) {
+        window.localStorage.setItem(k, serialized);
+        changed = true;
+      }
+    }
+    if (updatedAt) {
+      window.localStorage.setItem(SYNC_META_KEY, updatedAt);
+    }
+    if (changed) {
+      const primary =
+        (remoteState.__primaryState as Record<string, unknown> | undefined) ??
+        findPrimaryStateObject(remoteState);
+
+      window.dispatchEvent(
+        new CustomEvent(SYNC_EVENT_NAME, {
+          detail: { primary, snapshot: remoteState },
+        })
+      );
+    }
+    return changed;
+  } finally {
+    isApplyingRemote = false;
+  }
+}
+
+function broadcastRealtimeSignal(snapshot: Record<string, unknown>, updatedAt: string): void {
+  try {
+    localChannel?.postMessage({
+      sender: tabClientId,
+      snapshot,
+      updatedAt,
+    });
+  } catch {
+    // Ignore BroadcastChannel errors
+  }
+
+  try {
+    if (realtimeSocket && realtimeSocket.readyState === WebSocket.OPEN) {
+      realtimeSocket.send(
+        JSON.stringify({
+          topic: "realtime:pokergestor-live",
+          event: "broadcast",
+          payload: {
+            type: "broadcast",
+            event: "state_updated",
+            payload: { sender: tabClientId, updatedAt },
+          },
+          ref: String(Date.now()),
+        })
+      );
+    }
+  } catch {
+    // Ignore WebSocket errors
+  }
+}
 
 export async function pushStateToSupabase(
   explicitPrimary?: Record<string, unknown>
@@ -222,6 +292,9 @@ export async function pushStateToSupabase(
     }
 
     const nowIso = new Date().toISOString();
+    window.localStorage.setItem(SYNC_META_KEY, nowIso);
+    broadcastRealtimeSignal(snapshot, nowIso);
+
     const res = await fetch(`${SUPABASE_URL}/rest/v1/club_state_sync?on_conflict=club_id`, {
       method: "POST",
       headers: buildHeaders({ Prefer: "resolution=merge-duplicates,return=representation" }),
@@ -235,7 +308,6 @@ export async function pushStateToSupabase(
     });
 
     if (res.ok) {
-      window.localStorage.setItem(SYNC_META_KEY, nowIso);
       if (primary) {
         await upsertNormalizedTables(primary);
       }
@@ -258,7 +330,7 @@ export async function pullStateFromSupabase(
       `${SUPABASE_URL}/rest/v1/club_state_sync?club_id=eq.${DEFAULT_CLUB_ID}&select=state_json,updated_at`,
       {
         method: "GET",
-        headers: buildHeaders(),
+        headers: buildHeaders({ "Cache-Control": "no-cache" }),
       }
     );
     if (!res.ok) return null;
@@ -281,33 +353,79 @@ export async function pullStateFromSupabase(
       return null;
     }
 
-    isApplyingRemote = true;
-    try {
-      for (const [k, v] of Object.entries(remoteState)) {
-        if (k === "__primaryState" || k === SYNC_META_KEY) continue;
-        const serialized = typeof v === "string" ? v : JSON.stringify(v);
-        if (window.localStorage.getItem(k) !== serialized) {
-          window.localStorage.setItem(k, serialized);
-        }
-      }
-      if (row?.updated_at) {
-        window.localStorage.setItem(SYNC_META_KEY, row.updated_at);
-      }
-      const primary =
-        (remoteState.__primaryState as Record<string, unknown> | undefined) ??
-        findPrimaryStateObject(remoteState);
-
-      window.dispatchEvent(
-        new CustomEvent(SYNC_EVENT_NAME, {
-          detail: { primary, snapshot: remoteState },
-        })
-      );
-      return primary;
-    } finally {
-      isApplyingRemote = false;
-    }
+    applySnapshotToLocalStorage(remoteState, row?.updated_at);
+    return (
+      (remoteState.__primaryState as Record<string, unknown> | undefined) ??
+      findPrimaryStateObject(remoteState)
+    );
   } catch {
     return null;
+  }
+}
+
+function connectSupabaseRealtimeWebSocket(): void {
+  try {
+    const wsBase = SUPABASE_URL.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
+    const wsUrl = `${wsBase}/realtime/v1/websocket?apikey=${encodeURIComponent(SUPABASE_KEY)}&vsn=1.0.0`;
+    const ws = new WebSocket(wsUrl);
+    realtimeSocket = ws;
+
+    let heartbeatId: number | undefined;
+
+    ws.onopen = () => {
+      ws.send(
+        JSON.stringify({
+          topic: "realtime:pokergestor-live",
+          event: "phx_join",
+          payload: {
+            config: {
+              broadcast: { self: false },
+              postgres_changes: [
+                { event: "*", schema: "public", table: "club_state_sync" },
+              ],
+            },
+          },
+          ref: "1",
+        })
+      );
+
+      heartbeatId = window.setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              topic: "phoenix",
+              event: "heartbeat",
+              payload: {},
+              ref: String(Date.now()),
+            })
+          );
+        }
+      }, 25000);
+    };
+
+    ws.onmessage = ev => {
+      try {
+        const msg = JSON.parse(String(ev.data)) as {
+          event?: string;
+          payload?: Record<string, unknown>;
+        };
+        if (msg.event === "broadcast" || msg.event === "postgres_changes") {
+          void pullStateFromSupabase(true);
+        }
+      } catch {
+        // Ignore malformed messages
+      }
+    };
+
+    ws.onclose = () => {
+      if (heartbeatId) window.clearInterval(heartbeatId);
+      realtimeSocket = null;
+      window.setTimeout(() => {
+        connectSupabaseRealtimeWebSocket();
+      }, 3000);
+    };
+  } catch {
+    // Fallback to polling if WebSocket is unavailable
   }
 }
 
@@ -317,7 +435,35 @@ export function initSupabaseRealtimeSync(): void {
   if (initialized || typeof window === "undefined") return;
   initialized = true;
 
-  void pullStateFromSupabase(false);
+  void pullStateFromSupabase(true);
+
+  if ("BroadcastChannel" in window) {
+    localChannel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
+    localChannel.onmessage = ev => {
+      const data = ev.data as {
+        sender?: string;
+        snapshot?: Record<string, unknown>;
+        updatedAt?: string;
+      };
+      if (data?.sender === tabClientId || !data?.snapshot) return;
+      applySnapshotToLocalStorage(data.snapshot, data.updatedAt);
+    };
+  }
+
+  window.addEventListener("storage", ev => {
+    if (!ev.key || ev.key === SYNC_META_KEY || isApplyingRemote) return;
+    const snapshot = collectLocalStateSnapshot();
+    const primary = findPrimaryStateObject(snapshot);
+    window.dispatchEvent(
+      new CustomEvent(SYNC_EVENT_NAME, {
+        detail: { primary, snapshot },
+      })
+    );
+  });
+
+  window.addEventListener("focus", () => {
+    void pullStateFromSupabase(true);
+  });
 
   const origSetItem = window.localStorage.setItem.bind(window.localStorage);
   let debounceTimer: number | undefined;
@@ -328,10 +474,11 @@ export function initSupabaseRealtimeSync(): void {
     if (debounceTimer) window.clearTimeout(debounceTimer);
     debounceTimer = window.setTimeout(() => {
       void pushStateToSupabase();
-    }, 800);
+    }, 150);
   };
 
+  connectSupabaseRealtimeWebSocket();
   window.setInterval(() => {
     void pullStateFromSupabase(false);
-  }, 4000);
+  }, 1500);
 }

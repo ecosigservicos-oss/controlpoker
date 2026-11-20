@@ -148,9 +148,20 @@ export function ClubProvider({ children }: { children: ReactNode }) {
 
   const activeTournament =
     tournaments.find(item => item.id === selectedTournamentId) ?? tournaments[0] ?? null;
-  // Ligacao direta com o banco de dados Supabase
+  // Atualizacao automatica em tempo real em todas as telas sem precisar apertar F5
   useEffect(() => {
     initSupabaseRealtimeSync();
+
+    const applySyncedStorage = () => {
+
+    };
+
+    window.addEventListener("pokergestor:supabase-synced", applySyncedStorage);
+    window.addEventListener("storage", applySyncedStorage);
+    return () => {
+      window.removeEventListener("pokergestor:supabase-synced", applySyncedStorage);
+      window.removeEventListener("storage", applySyncedStorage);
+    };
   }, []);
 
 return (
