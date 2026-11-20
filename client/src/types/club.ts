@@ -51,6 +51,12 @@ export type TournamentRegistration = {
   time: string;
 };
 
+export type PayoutTier = {
+  place: number;
+  label: string;
+  percentage: number;
+};
+
 export type BlindLevel = {
   level: number;
   sb: number;
@@ -85,7 +91,14 @@ export type Tournament = {
   eliminatedCount?: number;
   capacity: number;
   registrations?: TournamentRegistration[];
+  payouts?: PayoutTier[];
 };
+
+export const DEFAULT_PAYOUT_TIERS: PayoutTier[] = [
+  { place: 1, label: "1º Lugar (Campeão)", percentage: 50 },
+  { place: 2, label: "2º Lugar (Vice-campeão)", percentage: 30 },
+  { place: 3, label: "3º Lugar", percentage: 20 },
+];
 
 export const DEFAULT_BLIND_LEVELS: BlindLevel[] = [
   { level: 1, sb: 50, bb: 100 },

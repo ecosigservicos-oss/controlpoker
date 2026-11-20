@@ -5,9 +5,11 @@ import {
   Crown,
   MonitorPlay,
   Pause,
+  Pencil,
   Play,
   Plus,
   Sparkles,
+  Trash2,
   Trophy,
   Tv2,
   UserCheck,
@@ -19,12 +21,27 @@ import { brl, PageIntro, parseBrlInput, StatusBadge } from "@/components/club/Sh
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
+  DEFAULT_PAYOUT_TIERS,
   getTournamentTotals,
   type EntryType,
+  type PayoutTier,
   type Tournament,
   type TournamentRegistration,
   type TournamentStatus,
 } from "@/types/club";
+
+const PAYOUT_PRESETS: { label: string; percentages: number[] }[] = [
+  { label: "Top 2 (65/35)", percentages: [65, 35] },
+  { label: "Top 3 (50/30/20)", percentages: [50, 30, 20] },
+  { label: "Top 4 (45/27/18/10)", percentages: [45, 27, 18, 10] },
+  { label: "Top 5 (40/25/17/10/8)", percentages: [40, 25, 17, 10, 8] },
+];
+
+function getDefaultPlaceLabel(place: number): string {
+  if (place === 1) return "1º Lugar (Campeão)";
+  if (place === 2) return "2º Lugar (Vice-campeão)";
+  return `${place}º Lugar`;
+}
 
 export function TournamentsView() {
   const {
@@ -43,6 +60,7 @@ export function TournamentsView() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [entryModalOpen, setEntryModalOpen] = useState(false);
+  const [payoutModalOpen, setPayoutModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"resumo" | "blinds" | "premiacao">("resumo");
 
   const [name, setName] = useState("");
@@ -60,6 +78,9 @@ export function TournamentsView() {
   const [entryValue, setEntryValue] = useState("");
   const [entryPayment, setEntryPayment] = useState("PIX");
   const [manualNameMode, setManualNameMode] = useState(false);
+
+  const [draftPayouts, setDraftPayouts] = useState<PayoutTier[]>(DEFAULT_PAYOUT_TIERS);
+  const [draftGuaranteed, setDraftGuaranteed] = useState("0,00");
 
   const selectedTournament =
     tournaments.find(item => item.id === selectedTournamentId) ?? tournaments[0] ?? null;
@@ -130,6 +151,70 @@ export function TournamentsView() {
     setEntryModalOpen(true);
   };
 
+  const handleOpenPayoutModal = () => {
+    if (!selectedTournament) return;
+    const currentTiers =
+      selectedTournament.payouts && selectedTournament.payouts.length > 0
+        ? selectedTournament.payouts.map(t => ({ ...t }))
+        : DEFAULT_PAYOUT_TIERS.map(t => ({ ...t }));
+    setDraftPayouts(currentTiers);
+    setDraftGuaranteed(selectedTournament.guaranteed.toFixed(2).replace(".", ","));
+    setPayoutModalOpen(true);
+  };
+
+  const handleApplyPayoutPreset = (percentages: number[]) => {
+    setDraftPayouts(
+      percentages.map((pct, idx) => ({
+        place: idx + 1,
+        label: getDefaultPlaceLabel(idx + 1),
+        percentage: pct,
+      }))
+    );
+  };
+
+  const handleAddPayoutTier = () => {
+    const nextPlace = draftPayouts.length + 1;
+    setDraftPayouts(current => [
+      ...current,
+      { place: nextPlace, label: getDefaultPlaceLabel(nextPlace), percentage: 0 },
+    ]);
+  };
+
+  const handleRemovePayoutTier = (index: number) => {
+    if (draftPayouts.length <= 1) return;
+    setDraftPayouts(current =>
+      current
+        .filter((_, idx) => idx !== index)
+        .map((tier, idx) => ({
+          ...tier,
+          place: idx + 1,
+        }))
+    );
+  };
+
+  const handleSavePayouts = (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedTournament) return;
+
+    const normalizedTiers: PayoutTier[] = draftPayouts.map((tier, idx) => ({
+      place: idx + 1,
+      label: tier.label.trim() || getDefaultPlaceLabel(idx + 1),
+      percentage: Math.max(0, Math.min(100, Number(tier.percentage) || 0)),
+    }));
+
+    const nextGuaranteed = Math.max(0, parseBrlInput(draftGuaranteed));
+
+    setTournaments(current =>
+      current.map(item =>
+        item.id === selectedTournament.id
+          ? { ...item, guaranteed: nextGuaranteed, payouts: normalizedTiers }
+          : item
+      )
+    );
+    setToast("Premiação atualizada com sucesso!");
+    setPayoutModalOpen(false);
+  };
+
   const handleSelectEntryType = (option: EntryType) => {
     setEntryType(option);
     setManualNameMode(false);
@@ -167,6 +252,7 @@ export function TournamentsView() {
       entries: 0,
       capacity: Math.max(9, Number(capacity) || 30),
       registrations: [],
+      payouts: DEFAULT_PAYOUT_TIERS.map(t => ({ ...t })),
     };
 
     setTournaments(current => [created, ...current]);
@@ -282,6 +368,17 @@ export function TournamentsView() {
   const totals = selectedTournament ? getTournamentTotals(selectedTournament, rules) : null;
   const collectedTotal = totals?.collectedTotal ?? 0;
   const effectivePrizePool = selectedTournament ? Math.max(selectedTournament.guaranteed, collectedTotal) : 0;
+
+  const activePayoutTiers =
+    selectedTournament?.payouts && selectedTournament.payouts.length > 0
+      ? selectedTournament.payouts
+      : DEFAULT_PAYOUT_TIERS;
+
+  const draftTotalPercentage = draftPayouts.reduce(
+    (sum, tier) => sum + (Number(tier.percentage) || 0),
+    0
+  );
+  const draftPreviewPrizePool = Math.max(parseBrlInput(draftGuaranteed), collectedTotal);
 
   const isExtraEntry = entryType === "Rebuy" || entryType === "Add-on";
   const showBuyInSelectorList = isExtraEntry && buyInPlayers.length > 0 && !manualNameMode;
@@ -436,7 +533,7 @@ export function TournamentsView() {
                   className={activeTab === "premiacao" ? "tab-active" : ""}
                   onClick={() => setActiveTab("premiacao")}
                 >
-                  Premiação
+                  Premiação ({activePayoutTiers.length})
                 </span>
               </div>
 
@@ -523,41 +620,311 @@ export function TournamentsView() {
               )}
 
               {activeTab === "premiacao" && (
-                <div className="detail-feed">
-                  <div>
-                    <div className="feed-icon feed-icon-gold">
-                      <Crown size={15} />
+                <div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      padding: "12px 14px",
+                      marginBottom: 10,
+                      borderRadius: 10,
+                      background: "#F8FAFC",
+                      border: "1px solid #E2E8F0",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div>
+                      <span
+                        style={{
+                          display: "block",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: "#64748B",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.05em",
+                        }}
+                      >
+                        Prize Pool Total
+                      </span>
+                      <strong style={{ fontSize: 16, color: "#0F172A" }}>
+                        {brl(effectivePrizePool)}
+                      </strong>{" "}
+                      <small style={{ color: "#64748B", fontSize: 12 }}>
+                        ({activePayoutTiers.length}{" "}
+                        {activePayoutTiers.length === 1 ? "posição premiada" : "posições premiadas"})
+                      </small>
                     </div>
-                    <p>
-                      <strong>1º Lugar (Campeão) — {brl(effectivePrizePool * 0.5)}</strong>
-                      <small>50% do prize pool total ({brl(effectivePrizePool)})</small>
-                    </p>
-                    <time>50%</time>
+
+                    <Button type="button" variant="outline" onClick={handleOpenPayoutModal}>
+                      <Pencil size={14} /> Editar premiação
+                    </Button>
                   </div>
-                  <div>
-                    <div className="feed-icon">
-                      <Trophy size={15} />
-                    </div>
-                    <p>
-                      <strong>2º Lugar (Vice-campeão) — {brl(effectivePrizePool * 0.3)}</strong>
-                      <small>30% do prize pool total ({brl(effectivePrizePool)})</small>
-                    </p>
-                    <time>30%</time>
-                  </div>
-                  <div>
-                    <div className="feed-icon">
-                      <Sparkles size={15} />
-                    </div>
-                    <p>
-                      <strong>3º Lugar — {brl(effectivePrizePool * 0.2)}</strong>
-                      <small>20% do prize pool total ({brl(effectivePrizePool)})</small>
-                    </p>
-                    <time>20%</time>
+
+                  <div className="detail-feed">
+                    {activePayoutTiers.map(tier => {
+                      const tierValue = effectivePrizePool * (tier.percentage / 100);
+                      return (
+                        <div key={tier.place}>
+                          <div className={cn("feed-icon", tier.place === 1 && "feed-icon-gold")}>
+                            {tier.place === 1 ? (
+                              <Crown size={15} />
+                            ) : tier.place === 2 ? (
+                              <Trophy size={15} />
+                            ) : (
+                              <Sparkles size={15} />
+                            )}
+                          </div>
+                          <p>
+                            <strong>
+                              {tier.label} — {brl(tierValue)}
+                            </strong>
+                            <small>
+                              {tier.percentage}% do prize pool total ({brl(effectivePrizePool)})
+                            </small>
+                          </p>
+                          <time>{tier.percentage}%</time>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
             </section>
           )}
+        </div>
+      )}
+
+      {payoutModalOpen && selectedTournament && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setPayoutModalOpen(false);
+          }}
+        >
+          <form className="modal-card" onSubmit={handleSavePayouts} style={{ maxWidth: 540 }}>
+            <div className="modal-heading">
+              <div>
+                <div className="eyebrow">{selectedTournament.name}</div>
+                <h2>Editar premiação</h2>
+                <p>Configure o garantido, a quantidade de premiados e os percentuais.</p>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setPayoutModalOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="form-grid">
+              <label>
+                Garantido GTD (R$)
+                <input
+                  value={draftGuaranteed}
+                  onChange={event => setDraftGuaranteed(event.target.value)}
+                  placeholder="0,00"
+                  inputMode="decimal"
+                />
+              </label>
+              <div>
+                <span className="eyebrow" style={{ display: "block", marginBottom: 6 }}>
+                  Prize Pool Estimado
+                </span>
+                <div
+                  style={{
+                    height: 40,
+                    display: "flex",
+                    alignItems: "center",
+                    padding: "0 12px",
+                    borderRadius: 10,
+                    background: "#F1F5F9",
+                    border: "1px solid #E2E8F0",
+                    fontWeight: 700,
+                    color: "#0F172A",
+                    fontSize: 15,
+                  }}
+                >
+                  {brl(draftPreviewPrizePool)}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <span className="eyebrow" style={{ display: "block", marginBottom: 6 }}>
+                Modelos rápidos
+              </span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {PAYOUT_PRESETS.map(preset => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => handleApplyPayoutPreset(preset.percentages)}
+                    style={{
+                      padding: "5px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #CBD5E1",
+                      background: "#F8FAFC",
+                      color: "#0F172A",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 8,
+                }}
+              >
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#0F172A" }}>
+                  Divisão por posição
+                </span>
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: Math.abs(draftTotalPercentage - 100) < 0.01 ? "#15803D" : "#DC2626",
+                  }}
+                >
+                  Total: {draftTotalPercentage}%
+                </span>
+              </div>
+
+              <div style={{ display: "grid", gap: 8, maxHeight: 240, overflowY: "auto", paddingRight: 2 }}>
+                {draftPayouts.map((tier, idx) => {
+                  const previewAmount = draftPreviewPrizePool * ((Number(tier.percentage) || 0) / 100);
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 86px 96px 32px",
+                        gap: 8,
+                        alignItems: "center",
+                      }}
+                    >
+                      <input
+                        value={tier.label}
+                        onChange={event => {
+                          const val = event.target.value;
+                          setDraftPayouts(current =>
+                            current.map((item, i) => (i === idx ? { ...item, label: val } : item))
+                          );
+                        }}
+                        placeholder={getDefaultPlaceLabel(idx + 1)}
+                        required
+                      />
+                      <div style={{ position: "relative" }}>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step="0.5"
+                          value={tier.percentage}
+                          onChange={event => {
+                            const val = Number(event.target.value);
+                            setDraftPayouts(current =>
+                              current.map((item, i) =>
+                                i === idx ? { ...item, percentage: Number.isFinite(val) ? val : 0 } : item
+                              )
+                            );
+                          }}
+                          style={{ paddingRight: 22, textAlign: "right" }}
+                          required
+                        />
+                        <span
+                          style={{
+                            position: "absolute",
+                            right: 8,
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                            fontSize: 12,
+                            color: "#64748B",
+                            pointerEvents: "none",
+                          }}
+                        >
+                          %
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12.5,
+                          fontWeight: 700,
+                          color: "#00A8C6",
+                          textAlign: "right",
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {brl(previewAmount)}
+                      </div>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        title="Remover posição"
+                        disabled={draftPayouts.length <= 1}
+                        onClick={() => handleRemovePayoutTier(idx)}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleAddPayoutTier}
+                style={{
+                  marginTop: 8,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  background: "none",
+                  border: "none",
+                  color: "#00A8C6",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                <Plus size={14} /> Adicionar {draftPayouts.length + 1}º lugar
+              </button>
+            </div>
+
+            {Math.abs(draftTotalPercentage - 100) >= 0.01 && (
+              <div
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  background: "#FEF2F2",
+                  border: "1px solid #FECACA",
+                  color: "#991B1B",
+                  fontSize: 12,
+                }}
+              >
+                A soma dos percentuais está em <strong>{draftTotalPercentage}%</strong> (o ideal é fechar em{" "}
+                <strong>100%</strong>).
+              </div>
+            )}
+
+            <div className="modal-actions">
+              <Button type="button" variant="outline" onClick={() => setPayoutModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" className="primary-button">
+                Salvar premiação
+              </Button>
+            </div>
+          </form>
         </div>
       )}
 
