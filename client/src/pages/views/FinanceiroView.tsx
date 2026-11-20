@@ -2,11 +2,14 @@
 import {
   ArrowDownLeft,
   ArrowUpRight,
+  Banknote,
   Building2,
   Coins,
+  CreditCard,
   Filter,
   Layers,
   Plus,
+  QrCode,
   Receipt,
   Search,
   Sparkles,
@@ -49,12 +52,100 @@ interface OpenTableOption {
   totalSaidas: number;
 }
 
+interface PaymentMethodSummary {
+  method: string;
+  entradas: number;
+  saidas: number;
+  saldo: number;
+  count: number;
+  percentage: number;
+}
+
 function formatBRL(value: number): string {
   return value.toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
     minimumFractionDigits: 2,
   });
+}
+
+function normalizePaymentMethod(raw: unknown, fallback = "Não informado"): string {
+  const cleaned = String(raw ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!cleaned) return fallback;
+
+  const lower = cleaned.toLowerCase();
+  if (lower === "pix" || lower.startsWith("pix ")) return "PIX";
+  if (lower.includes("pix") && lower.includes("caixa")) return "PIX / Caixa";
+  if (lower === "dinheiro" || lower === "especie" || lower === "espécie" || lower === "cash") {
+    return "Dinheiro";
+  }
+  if (lower.includes("crédito") || lower.includes("credito")) return "Cartão de Crédito";
+  if (lower.includes("débito") || lower.includes("debito")) return "Cartão de Débito";
+  if (lower === "cartao" || lower === "cartão") return "Cartão";
+  if (lower.includes("ficha")) return "Fichas";
+  if (lower.includes("saldo") || lower.includes("fiado") || lower.includes("conta")) {
+    return "Saldo / Conta";
+  }
+  if (lower.includes("transf") || lower.includes("ted") || lower.includes("doc")) {
+    return "Transferência";
+  }
+
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+function getPaymentVisualStyle(method: string): {
+  bg: string;
+  border: string;
+  badgeBg: string;
+  color: string;
+  kind: "pix" | "cash" | "card" | "chips" | "other";
+} {
+  const lower = method.toLowerCase();
+  if (lower.includes("pix")) {
+    return {
+      bg: "#F0FDFA",
+      border: "#99F6E4",
+      badgeBg: "#CCFBF1",
+      color: "#0D9488",
+      kind: "pix",
+    };
+  }
+  if (lower.includes("dinheiro")) {
+    return {
+      bg: "#F0FDF4",
+      border: "#BBF7D0",
+      badgeBg: "#DCFCE7",
+      color: "#15803D",
+      kind: "cash",
+    };
+  }
+  if (lower.includes("cartão") || lower.includes("cartao")) {
+    return {
+      bg: "#EFF6FF",
+      border: "#BFDBFE",
+      badgeBg: "#DBEAFE",
+      color: "#1D4ED8",
+      kind: "card",
+    };
+  }
+  if (lower.includes("ficha")) {
+    return {
+      bg: "#FFFBEB",
+      border: "#FDE68A",
+      badgeBg: "#FEF3C7",
+      color: "#B45309",
+      kind: "chips",
+    };
+  }
+  return {
+    bg: "#F8FAFC",
+    border: "#CBD5E1",
+    badgeBg: "#E2E8F0",
+    color: "#334155",
+    kind: "other",
+  };
 }
 
 function formatDateTime(raw?: unknown): { iso: string; label: string } {
@@ -129,6 +220,7 @@ export function FinanceiroView() {
   const [selectedOpenTableId, setSelectedOpenTableId] = useState<string>("all");
   const [originFilter, setOriginFilter] = useState<OriginFilter>("todos");
   const [kindFilter, setKindFilter] = useState<KindFilter>("todos");
+  const [paymentFilter, setPaymentFilter] = useState<string>("todos");
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [chartPeriod, setChartPeriod] = useState<ChartPeriod>("diario");
 
@@ -169,7 +261,9 @@ export function FinanceiroView() {
         const entryType = String(reg.entryType ?? "Buy-in");
         const playerName = String(reg.playerName ?? "Jogador").trim() || "Jogador";
         const regDt = formatDateTime(reg.timestamp ?? reg.createdAt ?? t.date ?? t.createdAt);
-        const payment = String(reg.paymentMethod ?? reg.payment ?? "PIX / Caixa");
+        const rawPayment =
+          reg.paymentMethod ?? reg.payment ?? reg.formaPagamento ?? reg.metodoPagamento;
+        const payment = normalizePaymentMethod(rawPayment, "PIX / Caixa");
 
         let defaultVal = buyInPrice;
         if (entryType.toLowerCase().includes("rebuy")) {
@@ -282,7 +376,10 @@ export function FinanceiroView() {
             origin: "torneio",
             kind: "saida",
             amount: val,
-            paymentMethod: String(pz.paymentMethod ?? "PIX / Caixa"),
+            paymentMethod: normalizePaymentMethod(
+              pz.paymentMethod ?? pz.payment ?? pz.formaPagamento,
+              "PIX / Caixa"
+            ),
             tableId: `torneio:${tId}`,
             tableName: tName,
             isTableOpen: isOpen,
@@ -354,7 +451,10 @@ export function FinanceiroView() {
           origin: "cash",
           kind: isOut ? "saida" : "entrada",
           amount: amt,
-          paymentMethod: String(mv.paymentMethod ?? "Fichas / Caixa"),
+          paymentMethod: normalizePaymentMethod(
+            mv.paymentMethod ?? mv.payment ?? mv.formaPagamento,
+            "Fichas"
+          ),
           tableId: `cash:${cId}`,
           tableName,
           isTableOpen: isOpen,
@@ -376,6 +476,10 @@ export function FinanceiroView() {
           0
         );
         const cashOutVal = toNumber(seat.cashOut ?? seat.returned ?? 0, 0);
+        const seatPayment = normalizePaymentMethod(
+          seat.paymentMethod ?? seat.payment ?? seat.formaPagamento,
+          "Fichas"
+        );
 
         if (pName || buyInVal > 0) {
           activePlayersCount += 1;
@@ -392,7 +496,7 @@ export function FinanceiroView() {
             origin: "cash",
             kind: "entrada",
             amount: buyInVal,
-            paymentMethod: String(seat.paymentMethod ?? "Fichas / Caixa"),
+            paymentMethod: seatPayment,
             tableId: `cash:${cId}`,
             tableName,
             isTableOpen: isOpen,
@@ -410,7 +514,7 @@ export function FinanceiroView() {
             origin: "cash",
             kind: "saida",
             amount: cashOutVal,
-            paymentMethod: String(seat.paymentMethod ?? "Caixa Clube"),
+            paymentMethod: seatPayment,
             tableId: `cash:${cId}`,
             tableName,
             isTableOpen: isOpen,
@@ -430,7 +534,7 @@ export function FinanceiroView() {
           origin: "cash",
           kind: "entrada",
           amount: rakeVal,
-          paymentMethod: "Fichas Mesa",
+          paymentMethod: "Fichas",
           tableId: `cash:${cId}`,
           tableName,
           isTableOpen: isOpen,
@@ -452,7 +556,7 @@ export function FinanceiroView() {
           origin: "cash",
           kind: "entrada",
           amount: toNumber(tbl.totalBuyIn, 0),
-          paymentMethod: "Caixa Cash",
+          paymentMethod: "Fichas",
           tableId: `cash:${cId}`,
           tableName,
           isTableOpen: isOpen,
@@ -501,7 +605,10 @@ export function FinanceiroView() {
         origin: "manual",
         kind: isOut ? "saida" : "entrada",
         amount: amt,
-        paymentMethod: String(tx.paymentMethod ?? tx.payment ?? "Caixa"),
+        paymentMethod: normalizePaymentMethod(
+          tx.paymentMethod ?? tx.payment ?? tx.formaPagamento,
+          "Dinheiro"
+        ),
         tableId: "manual:geral",
         tableName: "Caixa Geral",
         isTableOpen: true,
@@ -521,7 +628,7 @@ export function FinanceiroView() {
     [tableOptions]
   );
 
-  const filteredMovements = useMemo(() => {
+  const baseScopedMovements = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
 
     return allMovements.filter(item => {
@@ -552,25 +659,71 @@ export function FinanceiroView() {
     searchTerm,
   ]);
 
-  const totals = useMemo(() => {
-    const source =
-      tableStatusFilter !== "todas" ||
-      selectedOpenTableId !== "all" ||
-      originFilter !== "todos" ||
-      kindFilter !== "todos" ||
-      searchTerm.trim() !== ""
-        ? filteredMovements
-        : allMovements;
+  const paymentSummaries = useMemo<PaymentMethodSummary[]>(() => {
+    const map = new Map<
+      string,
+      { method: string; entradas: number; saidas: number; count: number }
+    >();
 
-    const entradas = source
+    baseScopedMovements.forEach(item => {
+      const methodKey = normalizePaymentMethod(item.paymentMethod, "Não informado");
+      const current = map.get(methodKey) ?? {
+        method: methodKey,
+        entradas: 0,
+        saidas: 0,
+        count: 0,
+      };
+
+      if (item.kind === "entrada") {
+        current.entradas += item.amount;
+      } else {
+        current.saidas += item.amount;
+      }
+      current.count += 1;
+      map.set(methodKey, current);
+    });
+
+    const totalEntradasGeral = Array.from(map.values()).reduce(
+      (acc, cur) => acc + cur.entradas,
+      0
+    );
+
+    return Array.from(map.values())
+      .map(entry => {
+        const saldo = entry.entradas - entry.saidas;
+        const baseShare =
+          totalEntradasGeral > 0
+            ? (entry.entradas / totalEntradasGeral) * 100
+            : 0;
+        return {
+          method: entry.method,
+          entradas: entry.entradas,
+          saidas: entry.saidas,
+          saldo,
+          count: entry.count,
+          percentage: Math.round(baseShare * 10) / 10,
+        };
+      })
+      .sort((a, b) => b.entradas - a.entradas || b.count - a.count);
+  }, [baseScopedMovements]);
+
+  const filteredMovements = useMemo(() => {
+    if (paymentFilter === "todos") return baseScopedMovements;
+    return baseScopedMovements.filter(
+      item => normalizePaymentMethod(item.paymentMethod) === paymentFilter
+    );
+  }, [baseScopedMovements, paymentFilter]);
+
+  const totals = useMemo(() => {
+    const entradas = filteredMovements
       .filter(m => m.kind === "entrada")
       .reduce((sum, m) => sum + m.amount, 0);
 
-    const saidas = source
+    const saidas = filteredMovements
       .filter(m => m.kind === "saida")
       .reduce((sum, m) => sum + m.amount, 0);
 
-    const despesas = source
+    const despesas = filteredMovements
       .filter(
         m =>
           m.kind === "saida" &&
@@ -582,15 +735,7 @@ export function FinanceiroView() {
     const caixa = lucro;
 
     return { entradas, saidas, lucro, despesas, caixa };
-  }, [
-    allMovements,
-    filteredMovements,
-    tableStatusFilter,
-    selectedOpenTableId,
-    originFilter,
-    kindFilter,
-    searchTerm,
-  ]);
+  }, [filteredMovements]);
 
   const chartBars = useMemo(() => {
     const map = new Map<string, { label: string; entradas: number; saidas: number }>();
@@ -640,6 +785,7 @@ export function FinanceiroView() {
     }
 
     const now = formatDateTime(new Date().toISOString());
+    const normalizedMethod = normalizePaymentMethod(newPayment, "PIX");
     const created: UnifiedMovement = {
       id: `manual-local-${Date.now()}`,
       dateIso: now.iso,
@@ -649,7 +795,7 @@ export function FinanceiroView() {
       origin: "manual",
       kind: newKind,
       amount: numericAmount,
-      paymentMethod: newPayment,
+      paymentMethod: normalizedMethod,
       tableId: "manual:geral",
       tableName: "Caixa Geral",
       isTableOpen: true,
@@ -682,6 +828,7 @@ export function FinanceiroView() {
     selectedOpenTableId !== "all" ||
     originFilter !== "todos" ||
     kindFilter !== "todos" ||
+    paymentFilter !== "todos" ||
     searchTerm.trim() !== "";
 
   const clearAllFilters = () => {
@@ -689,7 +836,16 @@ export function FinanceiroView() {
     setSelectedOpenTableId("all");
     setOriginFilter("todos");
     setKindFilter("todos");
+    setPaymentFilter("todos");
     setSearchTerm("");
+  };
+
+  const renderPaymentIcon = (kind: "pix" | "cash" | "card" | "chips" | "other", color: string) => {
+    if (kind === "pix") return <QrCode size={16} color={color} />;
+    if (kind === "cash") return <Banknote size={16} color={color} />;
+    if (kind === "card") return <CreditCard size={16} color={color} />;
+    if (kind === "chips") return <Coins size={16} color={color} />;
+    return <Wallet size={16} color={color} />;
   };
 
   return (
@@ -798,6 +954,7 @@ export function FinanceiroView() {
         </div>
       </div>
 
+      {/* Cards Principais (KPIs) */}
       <div
         style={{
           display: "grid",
@@ -989,6 +1146,216 @@ export function FinanceiroView() {
         </div>
       </div>
 
+      {/* Somatória por Tipo de Pagamento */}
+      <div
+        style={{
+          background: "#FFFFFF",
+          border: "1px solid #E2E8F0",
+          borderRadius: 16,
+          padding: "20px 22px",
+          marginBottom: 20,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+            marginBottom: 16,
+          }}
+        >
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 800, color: "#0F172A", margin: "0 0 2px" }}>
+              Totais por Tipo de Pagamento
+            </h2>
+            <p style={{ fontSize: 12.5, color: "#64748B", margin: 0 }}>
+              Somatória consolidada por forma de pagamento (PIX, Dinheiro, Cartão, Fichas, etc.). Clique em um cartão para filtrar os lançamentos.
+            </p>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {paymentFilter !== "todos" && (
+              <button
+                type="button"
+                onClick={() => setPaymentFilter("todos")}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 999,
+                  border: "1px solid #00A8C6",
+                  background: "#ECFEFF",
+                  color: "#0369A1",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  cursor: "pointer",
+                }}
+              >
+                <X size={13} /> Mostrando: {paymentFilter} (ver todos)
+              </button>
+            )}
+
+            <div
+              style={{
+                padding: "7px 14px",
+                borderRadius: 10,
+                background: "#071E36",
+                color: "#FFFFFF",
+                fontSize: 12.5,
+                fontWeight: 700,
+              }}
+            >
+              Somatória Total:{" "}
+              <span style={{ color: "#38BDF8" }}>
+                {formatBRL(
+                  paymentSummaries.reduce((acc, item) => acc + item.saldo, 0)
+                )}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {paymentSummaries.length === 0 ? (
+          <div
+            style={{
+              padding: "20px 14px",
+              borderRadius: 12,
+              background: "#F8FAFC",
+              border: "1px dashed #CBD5E1",
+              textAlign: "center",
+              color: "#64748B",
+              fontSize: 13,
+            }}
+          >
+            Nenhum pagamento registrado para os filtros selecionados.
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(225px, 1fr))",
+              gap: 14,
+            }}
+          >
+            {paymentSummaries.map(pm => {
+              const style = getPaymentVisualStyle(pm.method);
+              const isSelected = paymentFilter === pm.method;
+
+              return (
+                <button
+                  key={pm.method}
+                  type="button"
+                  onClick={() =>
+                    setPaymentFilter(prev => (prev === pm.method ? "todos" : pm.method))
+                  }
+                  style={{
+                    textAlign: "left",
+                    padding: "16px 18px",
+                    borderRadius: 14,
+                    border: isSelected
+                      ? "2px solid #071E36"
+                      : `1px solid ${style.border}`,
+                    background: isSelected ? "#F0F9FF" : style.bg,
+                    cursor: "pointer",
+                    transition: "transform 0.12s ease, box-shadow 0.12s ease",
+                    boxShadow: isSelected
+                      ? "0 8px 20px rgba(7, 30, 54, 0.12)"
+                      : "0 2px 6px rgba(15, 23, 42, 0.03)",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      marginBottom: 10,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span
+                        style={{
+                          width: 30,
+                          height: 30,
+                          borderRadius: 8,
+                          background: style.badgeBg,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        {renderPaymentIcon(style.kind, style.color)}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 13.5,
+                          fontWeight: 800,
+                          color: "#0F172A",
+                        }}
+                      >
+                        {pm.method}
+                      </span>
+                    </div>
+
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        padding: "2px 8px",
+                        borderRadius: 999,
+                        background: "#FFFFFF",
+                        color: style.color,
+                        border: `1px solid ${style.border}`,
+                      }}
+                    >
+                      {pm.percentage}%
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      fontSize: 22,
+                      fontWeight: 900,
+                      color: pm.saldo >= 0 ? "#0F172A" : "#DC2626",
+                      marginBottom: 6,
+                    }}
+                  >
+                    {formatBRL(pm.saldo)}
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      fontSize: 11.5,
+                      color: "#475569",
+                      fontWeight: 600,
+                    }}
+                  >
+                    <span>
+                      {pm.count} {pm.count === 1 ? "lançamento" : "lançamentos"}
+                    </span>
+                    {pm.saidas > 0 ? (
+                      <span>
+                        <strong style={{ color: "#059669" }}>+{formatBRL(pm.entradas)}</strong> /{" "}
+                        <strong style={{ color: "#DC2626" }}>-{formatBRL(pm.saidas)}</strong>
+                      </span>
+                    ) : (
+                      <span style={{ color: "#059669" }}>Entradas: {formatBRL(pm.entradas)}</span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Gráfico Evolução das entradas e saídas */}
       <div
         style={{
           background: "#FFFFFF",
@@ -1116,6 +1483,7 @@ export function FinanceiroView() {
         </div>
       </div>
 
+      {/* Painel de Movimentações Unificadas */}
       <div
         style={{
           background: "#FFFFFF",
@@ -1307,7 +1675,7 @@ export function FinanceiroView() {
               flexWrap: "wrap",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               {(
                 [
                   { id: "todos", label: "Entradas e Saídas" },
@@ -1336,6 +1704,34 @@ export function FinanceiroView() {
                   </button>
                 );
               })}
+
+              {paymentSummaries.length > 0 && (
+                <select
+                  value={paymentFilter}
+                  onChange={e => setPaymentFilter(e.target.value)}
+                  aria-label="Filtrar por tipo de pagamento"
+                  style={{
+                    height: 30,
+                    padding: "0 10px",
+                    borderRadius: 8,
+                    border:
+                      paymentFilter !== "todos"
+                        ? "1.5px solid #00A8C6"
+                        : "1px solid #CBD5E1",
+                    background: "#FFFFFF",
+                    color: "#0F172A",
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}
+                >
+                  <option value="todos">Pagamento: Todos ({paymentSummaries.length})</option>
+                  {paymentSummaries.map(pm => (
+                    <option key={pm.method} value={pm.method}>
+                      {pm.method} — {formatBRL(pm.saldo)} ({pm.count})
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -1349,7 +1745,7 @@ export function FinanceiroView() {
                   type="text"
                   value={searchTerm}
                   onChange={e => setSearchTerm(e.target.value)}
-                  placeholder="Buscar jogador, mesa ou torneio..."
+                  placeholder="Buscar jogador, mesa ou pagamento..."
                   style={{
                     height: 34,
                     width: 250,
@@ -1470,6 +1866,7 @@ export function FinanceiroView() {
           )}
         </div>
 
+        {/* Tabela de Lançamentos */}
         <div style={{ overflowX: "auto" }}>
           <table
             style={{
@@ -1514,83 +1911,101 @@ export function FinanceiroView() {
                   </td>
                 </tr>
               ) : (
-                filteredMovements.map(item => (
-                  <tr
-                    key={item.id}
-                    style={{
-                      borderBottom: "1px solid #F1F5F9",
-                    }}
-                  >
-                    <td style={{ padding: "11px 12px", color: "#64748B", whiteSpace: "nowrap" }}>
-                      {item.dateLabel}
-                    </td>
-                    <td style={{ padding: "11px 12px" }}>
-                      <div style={{ fontWeight: 700, color: "#0F172A" }}>{item.description}</div>
-                      {item.subDescription && (
-                        <div style={{ fontSize: 11.5, color: "#64748B" }}>{item.subDescription}</div>
-                      )}
-                    </td>
-                    <td style={{ padding: "11px 12px" }}>
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        {item.origin === "torneio" && <Trophy size={13} color="#0284C7" />}
-                        {item.origin === "cash" && <Coins size={13} color="#059669" />}
-                        {item.origin === "manual" && <Layers size={13} color="#7C3AED" />}
-                        <span style={{ fontWeight: 600, color: "#334155" }}>{item.tableName}</span>
-                        {item.origin !== "manual" && (
-                          <span
-                            style={{
-                              fontSize: 10,
-                              fontWeight: 700,
-                              padding: "1px 6px",
-                              borderRadius: 999,
-                              background: item.isTableOpen ? "#DCFCE7" : "#F1F5F9",
-                              color: item.isTableOpen ? "#15803D" : "#64748B",
-                            }}
-                          >
-                            {item.isTableOpen ? "Aberta" : "Fechada"}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td style={{ padding: "11px 12px", color: "#475569" }}>{item.category}</td>
-                    <td style={{ padding: "11px 12px" }}>
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 4,
-                          padding: "3px 9px",
-                          borderRadius: 999,
-                          fontSize: 11.5,
-                          fontWeight: 700,
-                          background: item.kind === "entrada" ? "#ECFDF5" : "#FEF2F2",
-                          color: item.kind === "entrada" ? "#059669" : "#DC2626",
-                        }}
-                      >
-                        {item.kind === "entrada" ? "Entrada" : "Saída"}
-                      </span>
-                    </td>
-                    <td
+                filteredMovements.map(item => {
+                  const pmStyle = getPaymentVisualStyle(item.paymentMethod);
+                  return (
+                    <tr
+                      key={item.id}
                       style={{
-                        padding: "11px 12px",
-                        fontWeight: 800,
-                        color: item.kind === "entrada" ? "#059669" : "#DC2626",
-                        whiteSpace: "nowrap",
+                        borderBottom: "1px solid #F1F5F9",
                       }}
                     >
-                      {item.kind === "entrada" ? "+" : "-"} {formatBRL(item.amount)}
-                    </td>
-                    <td style={{ padding: "11px 12px", color: "#475569" }}>
-                      {item.paymentMethod}
-                    </td>
-                  </tr>
-                ))
+                      <td style={{ padding: "11px 12px", color: "#64748B", whiteSpace: "nowrap" }}>
+                        {item.dateLabel}
+                      </td>
+                      <td style={{ padding: "11px 12px" }}>
+                        <div style={{ fontWeight: 700, color: "#0F172A" }}>{item.description}</div>
+                        {item.subDescription && (
+                          <div style={{ fontSize: 11.5, color: "#64748B" }}>{item.subDescription}</div>
+                        )}
+                      </td>
+                      <td style={{ padding: "11px 12px" }}>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          {item.origin === "torneio" && <Trophy size={13} color="#0284C7" />}
+                          {item.origin === "cash" && <Coins size={13} color="#059669" />}
+                          {item.origin === "manual" && <Layers size={13} color="#7C3AED" />}
+                          <span style={{ fontWeight: 600, color: "#334155" }}>{item.tableName}</span>
+                          {item.origin !== "manual" && (
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                padding: "1px 6px",
+                                borderRadius: 999,
+                                background: item.isTableOpen ? "#DCFCE7" : "#F1F5F9",
+                                color: item.isTableOpen ? "#15803D" : "#64748B",
+                              }}
+                            >
+                              {item.isTableOpen ? "Aberta" : "Fechada"}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ padding: "11px 12px", color: "#475569" }}>{item.category}</td>
+                      <td style={{ padding: "11px 12px" }}>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                            padding: "3px 9px",
+                            borderRadius: 999,
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            background: item.kind === "entrada" ? "#ECFDF5" : "#FEF2F2",
+                            color: item.kind === "entrada" ? "#059669" : "#DC2626",
+                          }}
+                        >
+                          {item.kind === "entrada" ? "Entrada" : "Saída"}
+                        </span>
+                      </td>
+                      <td
+                        style={{
+                          padding: "11px 12px",
+                          fontWeight: 800,
+                          color: item.kind === "entrada" ? "#059669" : "#DC2626",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {item.kind === "entrada" ? "+" : "-"} {formatBRL(item.amount)}
+                      </td>
+                      <td style={{ padding: "11px 12px" }}>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 5,
+                            padding: "3px 9px",
+                            borderRadius: 999,
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            background: pmStyle.badgeBg,
+                            color: pmStyle.color,
+                          }}
+                        >
+                          {item.paymentMethod}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
 
+      {/* Modal Nova Transação Manual */}
       {modalOpen && (
         <div
           style={{
@@ -1739,8 +2154,11 @@ export function FinanceiroView() {
                   >
                     <option value="PIX">PIX</option>
                     <option value="Dinheiro">Dinheiro</option>
-                    <option value="Cartão">Cartão</option>
+                    <option value="Cartão de Crédito">Cartão de Crédito</option>
+                    <option value="Cartão de Débito">Cartão de Débito</option>
                     <option value="Fichas">Fichas</option>
+                    <option value="Transferência">Transferência</option>
+                    <option value="Saldo / Conta">Saldo / Conta</option>
                   </select>
                 </div>
               </div>
