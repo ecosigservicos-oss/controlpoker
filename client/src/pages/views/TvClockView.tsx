@@ -190,8 +190,7 @@ export function TvClockView() {
     void pullStateFromSupabase(true);
     const onSynced = () => setLiveSyncTick(t => t + 1);
     window.addEventListener("pokergestor:supabase-synced", onSynced);
-    const pollId = window.setInterval(() => {
-      void pullStateFromSupabase(true);
+    const pollId = window.setInterval(() => { void pullStateFromSupabase(false);
     }, 2000);
     return () => {
       window.removeEventListener("pokergestor:supabase-synced", onSynced);

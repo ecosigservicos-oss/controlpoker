@@ -1,4 +1,5 @@
 // Sincronizacao instantanea em tempo real entre PokerGestor e Supabase (PostgreSQL + Realtime)
+// Com protecao contra sobrescrita (race condition) usando revisao monotonica (_rev) e trava de escrita local
 
 export const SUPABASE_URL =
   import.meta.env.VITE_SUPABASE_URL || "https://zwqpykunofoetqwioydy.supabase.co";
@@ -76,6 +77,7 @@ function findPrimaryStateObject(
 
 async function upsertNormalizedTables(primary: Record<string, unknown>): Promise<void> {
   const nowIso = new Date().toISOString();
+  const tasks: Array<Promise<unknown>> = [];
 
   const clubPayload = [
     {
@@ -91,11 +93,13 @@ async function upsertNormalizedTables(primary: Record<string, unknown>): Promise
       updated_at: nowIso,
     },
   ];
-  await fetch(`${SUPABASE_URL}/rest/v1/clubs?on_conflict=id`, {
-    method: "POST",
-    headers: buildHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" }),
-    body: JSON.stringify(clubPayload),
-  });
+  tasks.push(
+    fetch(`${SUPABASE_URL}/rest/v1/clubs?on_conflict=id`, {
+      method: "POST",
+      headers: buildHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" }),
+      body: JSON.stringify(clubPayload),
+    })
+  );
 
   const structures = Array.isArray(primary.blindStructures)
     ? primary.blindStructures
@@ -123,11 +127,13 @@ async function upsertNormalizedTables(primary: Record<string, unknown>): Promise
         : [],
       updated_at: nowIso,
     }));
-    await fetch(`${SUPABASE_URL}/rest/v1/blind_structures?on_conflict=id`, {
-      method: "POST",
-      headers: buildHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" }),
-      body: JSON.stringify(structRows),
-    });
+    tasks.push(
+      fetch(`${SUPABASE_URL}/rest/v1/blind_structures?on_conflict=id`, {
+        method: "POST",
+        headers: buildHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" }),
+        body: JSON.stringify(structRows),
+      })
+    );
   }
 
   if (Array.isArray(primary.tournaments) && primary.tournaments.length > 0) {
@@ -164,11 +170,13 @@ async function upsertNormalizedTables(primary: Record<string, unknown>): Promise
         updated_at: nowIso,
       })
     );
-    await fetch(`${SUPABASE_URL}/rest/v1/tournaments?on_conflict=id`, {
-      method: "POST",
-      headers: buildHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" }),
-      body: JSON.stringify(tournRows),
-    });
+    tasks.push(
+      fetch(`${SUPABASE_URL}/rest/v1/tournaments?on_conflict=id`, {
+        method: "POST",
+        headers: buildHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" }),
+        body: JSON.stringify(tournRows),
+      })
+    );
   }
 
   if (Array.isArray(primary.players) && primary.players.length > 0) {
@@ -187,11 +195,13 @@ async function upsertNormalizedTables(primary: Record<string, unknown>): Promise
         updated_at: nowIso,
       })
     );
-    await fetch(`${SUPABASE_URL}/rest/v1/players?on_conflict=id`, {
-      method: "POST",
-      headers: buildHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" }),
-      body: JSON.stringify(playerRows),
-    });
+    tasks.push(
+      fetch(`${SUPABASE_URL}/rest/v1/players?on_conflict=id`, {
+        method: "POST",
+        headers: buildHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" }),
+        body: JSON.stringify(playerRows),
+      })
+    );
   }
 
   const rawTx = Array.isArray(primary.transactions)
@@ -212,22 +222,31 @@ async function upsertNormalizedTables(primary: Record<string, unknown>): Promise
       player_name: tx.playerName ? String(tx.playerName) : null,
       tournament_id: tx.tournamentId ? String(tx.tournamentId) : null,
     }));
-    await fetch(`${SUPABASE_URL}/rest/v1/financial_transactions?on_conflict=id`, {
-      method: "POST",
-      headers: buildHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" }),
-      body: JSON.stringify(txRows),
-    });
+    tasks.push(
+      fetch(`${SUPABASE_URL}/rest/v1/financial_transactions?on_conflict=id`, {
+        method: "POST",
+        headers: buildHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" }),
+        body: JSON.stringify(txRows),
+      })
+    );
   }
+
+  await Promise.all(tasks);
 }
 
 let isPushing = false;
 let isApplyingRemote = false;
 let hasCompletedInitialPull = false;
-let lastAppliedRemoteHash = "";
+let currentRevision = 0;
+let localWriteLockUntil = 0;
 let lastKnownLiveContext: Record<string, unknown> | null = null;
 let localChannel: BroadcastChannel | null = null;
 let realtimeSocket: WebSocket | null = null;
 const tabClientId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+function markLocalDirty(ms = 4500): void {
+  localWriteLockUntil = Math.max(localWriteLockUntil, Date.now() + ms);
+}
 
 function applySnapshotEverywhere(
   remoteState: Record<string, unknown>,
@@ -236,7 +255,16 @@ function applySnapshotEverywhere(
   isApplyingRemote = true;
   try {
     for (const [k, v] of Object.entries(remoteState)) {
-      if (k === "__liveContext" || k === "__primaryState" || k === SYNC_META_KEY || isUiNavigationKey(k)) continue;
+      if (
+        k === "__liveContext" ||
+        k === "__primaryState" ||
+        k === "__rev" ||
+        k === "__writerId" ||
+        k === SYNC_META_KEY ||
+        isUiNavigationKey(k)
+      ) {
+        continue;
+      }
       const serialized = typeof v === "string" ? v : JSON.stringify(v);
       if (window.localStorage.getItem(k) !== serialized) {
         window.localStorage.setItem(k, serialized);
@@ -285,7 +313,7 @@ function broadcastRealtimeSignal(snapshot: Record<string, unknown>, updatedAt: s
           payload: {
             type: "broadcast",
             event: "state_updated",
-            payload: { sender: tabClientId, updatedAt },
+            payload: { sender: tabClientId, rev: currentRevision, updatedAt },
           },
           ref: String(Date.now()),
         })
@@ -300,15 +328,20 @@ export async function pushStateToSupabase(
   explicitLiveContext?: Record<string, unknown>,
   forcePush = false
 ): Promise<boolean> {
-  if (isPushing || isApplyingRemote) return false;
+  if (isApplyingRemote) return false;
   if (!hasCompletedInitialPull && !forcePush) return false;
 
+  markLocalDirty(4500);
+
+  if (explicitLiveContext && Object.keys(explicitLiveContext).length > 0) {
+    lastKnownLiveContext = explicitLiveContext;
+  }
+
+  if (isPushing) return false;
   isPushing = true;
+
   try {
     const snapshot = collectLocalStateSnapshot();
-    if (explicitLiveContext && Object.keys(explicitLiveContext).length > 0) {
-      lastKnownLiveContext = explicitLiveContext;
-    }
     if (lastKnownLiveContext && Object.keys(lastKnownLiveContext).length > 0) {
       snapshot.__liveContext = lastKnownLiveContext;
     }
@@ -318,8 +351,9 @@ export async function pushStateToSupabase(
       return false;
     }
 
-    const payloadHash = JSON.stringify(snapshot);
-    lastAppliedRemoteHash = payloadHash;
+    currentRevision += 1;
+    snapshot.__rev = currentRevision;
+    snapshot.__writerId = tabClientId;
 
     const nowIso = new Date().toISOString();
     window.localStorage.setItem(SYNC_META_KEY, nowIso);
@@ -341,6 +375,7 @@ export async function pushStateToSupabase(
       if (primary) {
         await upsertNormalizedTables(primary);
       }
+      localWriteLockUntil = Date.now() + 1200;
       return true;
     }
     return false;
@@ -354,7 +389,10 @@ export async function pushStateToSupabase(
 export async function pullStateFromSupabase(
   force = false
 ): Promise<Record<string, unknown> | null> {
-  if (isPushing) return null;
+  if (isPushing || isApplyingRemote) return null;
+  if (!force && Date.now() < localWriteLockUntil) return null;
+
+  const pullStartedAt = Date.now();
   try {
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/club_state_sync?club_id=eq.${DEFAULT_CLUB_ID}&select=state_json,updated_at`,
@@ -367,6 +405,12 @@ export async function pullStateFromSupabase(
       hasCompletedInitialPull = true;
       return null;
     }
+
+    if (isPushing || localWriteLockUntil > pullStartedAt) {
+      hasCompletedInitialPull = true;
+      return null;
+    }
+
     const rows = (await res.json()) as Array<{
       state_json?: Record<string, unknown>;
       updated_at?: string;
@@ -380,12 +424,20 @@ export async function pullStateFromSupabase(
       return null;
     }
 
-    const remoteHash = JSON.stringify(remoteState);
-    if (!force && remoteHash === lastAppliedRemoteHash) {
+    const remoteRev = Number(remoteState.__rev ?? 0);
+    const remoteWriter = String(remoteState.__writerId ?? "");
+
+    if (remoteWriter === tabClientId && !force) {
+      return null;
+    }
+    if (!force && remoteRev > 0 && remoteRev <= currentRevision) {
       return null;
     }
 
-    lastAppliedRemoteHash = remoteHash;
+    if (remoteRev > currentRevision) {
+      currentRevision = remoteRev;
+    }
+
     applySnapshotEverywhere(remoteState, row?.updated_at);
     return findPrimaryStateObject(remoteState);
   } catch {
@@ -441,7 +493,7 @@ function connectSupabaseRealtimeWebSocket(): void {
           payload?: Record<string, unknown>;
         };
         if (msg.event === "broadcast" || msg.event === "postgres_changes") {
-          void pullStateFromSupabase(true);
+          void pullStateFromSupabase(false);
         }
       } catch {
         // Ignore malformed messages
@@ -477,13 +529,17 @@ export function initSupabaseRealtimeSync(): void {
         updatedAt?: string;
       };
       if (data?.sender === tabClientId || !data?.snapshot) return;
-      lastAppliedRemoteHash = JSON.stringify(data.snapshot);
+      if (isPushing || Date.now() < localWriteLockUntil) return;
+      const incomingRev = Number(data.snapshot.__rev ?? 0);
+      if (incomingRev > 0 && incomingRev <= currentRevision) return;
+      if (incomingRev > currentRevision) currentRevision = incomingRev;
       applySnapshotEverywhere(data.snapshot, data.updatedAt);
     };
   }
 
   window.addEventListener("storage", ev => {
-    if (!ev.key || ev.key === SYNC_META_KEY || isApplyingRemote) return;
+    if (!ev.key || ev.key === SYNC_META_KEY || isApplyingRemote || isUiNavigationKey(ev.key)) return;
+    if (isPushing || Date.now() < localWriteLockUntil) return;
     const snapshot = collectLocalStateSnapshot();
     const liveContext = findPrimaryStateObject(snapshot);
     window.dispatchEvent(
@@ -493,24 +549,22 @@ export function initSupabaseRealtimeSync(): void {
     );
   });
 
-  window.addEventListener("focus", () => {
-    void pullStateFromSupabase(true);
-  });
-
   const origSetItem = window.localStorage.setItem.bind(window.localStorage);
   let debounceTimer: number | undefined;
 
   window.localStorage.setItem = (key: string, value: string) => {
     origSetItem(key, value);
-    if (isApplyingRemote || key === SYNC_META_KEY || !hasCompletedInitialPull) return;
+    if (isApplyingRemote || key === SYNC_META_KEY || isUiNavigationKey(key)) return;
+    markLocalDirty(4500);
+    if (!hasCompletedInitialPull) return;
     if (debounceTimer) window.clearTimeout(debounceTimer);
     debounceTimer = window.setTimeout(() => {
       void pushStateToSupabase();
-    }, 150);
+    }, 120);
   };
 
   connectSupabaseRealtimeWebSocket();
   window.setInterval(() => {
     void pullStateFromSupabase(false);
-  }, 1500);
+  }, 2000);
 }
