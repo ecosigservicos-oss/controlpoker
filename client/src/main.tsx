@@ -1,4 +1,6 @@
-﻿import { createRoot } from "react-dom/client";
+import { initSupabaseRealtimeSync } from "@/lib/supabaseSync";
+initSupabaseRealtimeSync();
+import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import { AuthProvider } from "./context/AuthContext";

@@ -125,7 +125,7 @@ export function Sidebar({
       <div className="sidebar-bottom">
         <div className="sidebar-status">
           <span className="pulse-dot" />
-          <span>Sistema operacional</span>
+          <span>Supabase conectado</span>
           <ShieldCheck size={14} />
         </div>
         <button className="user-switcher">
