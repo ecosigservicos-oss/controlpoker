@@ -1,4 +1,5 @@
-﻿import { useEffect, useState, type FormEvent } from "react";
+import { BbAnteControl } from "@/components/club/BbAnteControl";
+import { useEffect, useState, type FormEvent } from "react";
 import { CircleDollarSign, Clock3, RotateCcw, Sparkles, Trophy, X, Zap } from "lucide-react";
 import { useClub } from "@/context/ClubContext";
 import { brl, MetricCard, PageIntro, parseBrlInput, StatusBadge } from "@/components/club/SharedUI";
@@ -113,9 +114,9 @@ export function BlindsStructureView() {
             <Button type="button" variant="outline" onClick={handleResetDefault}>
               <RotateCcw size={14} /> Restaurar padrão
             </Button>
-            <Button type="button" className="primary-button" onClick={() => setView("tournaments")}>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><BbAnteControl /><Button type="button" className="primary-button" onClick={() => setView("tournaments")}>
               <Trophy size={14} /> Ir para Torneios
-            </Button>
+            </Button></div>
           </div>
         </div>
 

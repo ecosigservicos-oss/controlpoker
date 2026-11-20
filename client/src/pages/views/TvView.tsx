@@ -1,3 +1,4 @@
+import { BbAnteControl } from "@/components/club/BbAnteControl";
 import { TvDrawView } from "./TvDrawView";
 import { TvClockView } from "./TvClockView";
 import { useEffect, useState } from "react";
@@ -57,9 +58,9 @@ function _Legacy_TvView({ mode }: { mode: "clock" | "draw" }) {
           <h2>{mode === "clock" ? "Nenhum torneio no Clocker" : "Nenhum sorteio disponível"}</h2>
           <p>Crie um torneio primeiro para ativar o relógio de blinds ou o sorteio de mesas.</p>
           <div className="empty-actions">
-            <Button className="primary-button" onClick={() => setView("tournaments")}>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><BbAnteControl /><Button className="primary-button" onClick={() => setView("tournaments")}>
               <Trophy size={15} /> Ir para torneios
-            </Button>
+            </Button></div>
           </div>
         </div>
         <div className="tv-footer-hint">

@@ -1,4 +1,5 @@
-﻿import { useMemo, useState, type FormEvent } from "react";
+import { BbAnteControl } from "@/components/club/BbAnteControl";
+import { useMemo, useState, type FormEvent } from "react";
 import {
   Check,
   Clock3,
@@ -666,9 +667,9 @@ export function TournamentsView() {
                       </small>
                     </div>
 
-                    <Button type="button" variant="outline" onClick={handleOpenBlindTimeModal}>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><BbAnteControl /><Button type="button" variant="outline" onClick={handleOpenBlindTimeModal}>
                       <Pencil size={14} /> Editar time dos blinds
-                    </Button>
+                    </Button></div>
                   </div>
 
                   <div className="detail-feed">

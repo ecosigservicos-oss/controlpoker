@@ -1,4 +1,5 @@
-﻿import { useEffect, useState, type FormEvent } from "react";
+import { BbAnteControl } from "@/components/club/BbAnteControl";
+import { useEffect, useState, type FormEvent } from "react";
 import { CircleDollarSign, Clock3, Pencil, RotateCcw, Sparkles, Trophy, X, Zap } from "lucide-react";
 import { useClub } from "@/context/ClubContext";
 import { brl, PageIntro, parseBrlInput, StatusBadge } from "@/components/club/SharedUI";
@@ -186,15 +187,15 @@ export function BlindsView() {
           </div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Button type="button" variant="outline" onClick={handleOpenTimeModal}>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><BbAnteControl /><Button type="button" variant="outline" onClick={handleOpenTimeModal}>
               <Pencil size={14} /> Editar time dos blinds ({currentBlindMinutes} min)
-            </Button>
+            </Button></div>
             <Button type="button" variant="outline" onClick={handleRestoreDefaults}>
               <RotateCcw size={14} /> Restaurar padrão
             </Button>
-            <Button type="button" className="primary-button" onClick={() => setView("tournaments")}>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><BbAnteControl /><Button type="button" className="primary-button" onClick={() => setView("tournaments")}>
               <Trophy size={14} /> Ir para Torneios
-            </Button>
+            </Button></div>
           </div>
         </div>
 

@@ -295,6 +295,54 @@ export function TvClockView() {
     };
   }, [club, selectedTournament]);
 
+  const setTournaments = club.setTournaments as
+    | ((updater: (prev: Array<Record<string, unknown>>) => Array<Record<string, unknown>>) => void)
+    | undefined;
+  const setBlindStructures = club.setBlindStructures as
+    | ((updater: (prev: Array<Record<string, unknown>>) => Array<Record<string, unknown>>) => void)
+    | undefined;
+
+  const toggleLiveBbAnte = useCallback(() => {
+    const enable = !blindLevels.some(l => l.ante > 0);
+    const updatedLevels = blindLevels.map(l => ({
+      ...l,
+      ante: enable && !l.isBreak ? l.bigBlind : 0,
+    }));
+
+    if (typeof setTournaments === "function") {
+      setTournaments(prev =>
+        prev.map(t => {
+          if (selectedTournament && String(t.id) !== String(selectedTournament.id)) {
+            return t;
+          }
+          return {
+            ...t,
+            blindLevels: updatedLevels,
+            levels: updatedLevels,
+            bbAnteEnabled: enable,
+          };
+        })
+      );
+    }
+
+    if (typeof setBlindStructures === "function") {
+      setBlindStructures(prev =>
+        prev.map((s, idx) => {
+          const isMatch = matchedStructure
+            ? String(s.id) === String(matchedStructure.id)
+            : idx === 0;
+          if (!isMatch) return s;
+          return {
+            ...s,
+            levels: updatedLevels,
+            blindLevels: updatedLevels,
+            bbAnteEnabled: enable,
+          };
+        })
+      );
+    }
+  }, [blindLevels, setTournaments, setBlindStructures, selectedTournament, matchedStructure]);
+
   const [levelIndex, setLevelIndex] = useState(0);
   const currentLevel = blindLevels[levelIndex] ?? blindLevels[0];
   const nextLevel = blindLevels[levelIndex + 1] ?? null;
@@ -835,12 +883,15 @@ export function TvClockView() {
           </div>
 
           <div
+            onClick={toggleLiveBbAnte}
+            title="Clique para ativar/desativar BB Ante (1x Big Blind)"
             style={{
               background: "rgba(7, 25, 45, 0.85)",
-              border: "1px solid rgba(245, 158, 11, 0.28)",
+              border: "1px solid rgba(245, 158, 11, 0.35)",
               borderRadius: 18,
               padding: "18px 22px",
               textAlign: "center",
+              cursor: "pointer",
             }}
           >
             <div
@@ -864,6 +915,9 @@ export function TvClockView() {
               }}
             >
               {currentLevel?.isBreak ? "-" : formatNumber(currentLevel?.ante ?? 0)}
+            </div>
+            <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 4 }}>
+              {(currentLevel?.ante ?? 0) > 0 ? "BB Ante ativo · clique para alterar" : "Clique para ativar 1x BB"}
             </div>
           </div>
 
