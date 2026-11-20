@@ -1,4 +1,4 @@
-import { initSupabaseRealtimeSync, pushStateToSupabase } from "@/lib/supabaseSync";
+import { initSupabaseRealtimeSync } from "@/lib/supabaseSync";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import {
   DEFAULT_BLIND_LEVELS,
@@ -151,41 +151,9 @@ export function ClubProvider({ children }: { children: ReactNode }) {
   // Ligacao direta com o banco de dados Supabase
   useEffect(() => {
     initSupabaseRealtimeSync();
-
-    const handleRemoteSync = (ev: Event) => {
-      const detail = (ev as CustomEvent<{ primary?: Record<string, unknown> }>).detail;
-      const remote = detail?.primary;
-      if (!remote) return;
-      if (Array.isArray(remote.tournaments) && typeof setTournaments === "function") {
-        setTournaments(remote.tournaments);
-      }
-      if (Array.isArray(remote.blindStructures) && typeof setBlindStructures === "function") {
-        setBlindStructures(remote.blindStructures);
-      }
-      if (Array.isArray(remote.players) && typeof setPlayers === "function") {
-        setPlayers(remote.players);
-      }
-    };
-
-    window.addEventListener("pokergestor:supabase-synced", handleRemoteSync);
-    return () => {
-      window.removeEventListener("pokergestor:supabase-synced", handleRemoteSync);
-    };
   }, []);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void pushStateToSupabase({
-        tournaments: typeof tournaments !== "undefined" ? tournaments : [],
-        blindStructures: typeof blindStructures !== "undefined" ? blindStructures : [],
-        players: typeof players !== "undefined" ? players : [],
-      });
-    }, 900);
-    return () => window.clearTimeout(timer);
-  }, [tournaments, blindStructures, players]);
-
-
-  return (
+return (
     <ClubContext.Provider
       value={{
         view,

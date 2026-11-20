@@ -28,25 +28,13 @@ function collectLocalStateSnapshot(): Record<string, unknown> {
   try {
     for (let i = 0; i < window.localStorage.length; i++) {
       const key = window.localStorage.key(i);
-      if (!key || key === SYNC_META_KEY) continue;
-      const lower = key.toLowerCase();
-      if (
-        lower.includes("poker") ||
-        lower.includes("club") ||
-        lower.includes("tournament") ||
-        lower.includes("blind") ||
-        lower.includes("player") ||
-        lower.includes("cash") ||
-        lower.includes("bar") ||
-        lower.includes("financ")
-      ) {
-        const raw = window.localStorage.getItem(key);
-        if (raw !== null) {
-          try {
-            snapshot[key] = JSON.parse(raw);
-          } catch {
-            snapshot[key] = raw;
-          }
+      if (!key || key === SYNC_META_KEY || key.startsWith("__")) continue;
+      const raw = window.localStorage.getItem(key);
+      if (raw !== null) {
+        try {
+          snapshot[key] = JSON.parse(raw);
+        } catch {
+          snapshot[key] = raw;
         }
       }
     }
