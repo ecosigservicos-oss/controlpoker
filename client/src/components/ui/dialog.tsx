@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { cn } from "@/lib/utils";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { XIcon } from "lucide-react";
@@ -22,9 +23,9 @@ export const useDialogComposition = () =>
 function Dialog({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  const composingRef = React.useRef(false);
-  const justEndedRef = React.useRef(false);
-  const endTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const composingRef = useRef(false);
+  const justEndedRef = useRef(false);
+  const endTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const contextValue = React.useMemo(
     () => ({

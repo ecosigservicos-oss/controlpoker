@@ -1,5 +1,5 @@
 import { initSupabaseRealtimeSync, pushStateToSupabase } from "@/lib/supabaseSync";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { useRef, createContext, useContext, useEffect, useState, type ReactNode  } from "react";
 import {
   DEFAULT_BLIND_LEVELS,
   DEFAULT_TOURNAMENT_RULES,
@@ -155,7 +155,7 @@ useEffect(() => {
     return () => window.clearTimeout(timer);
   }, [view, transactions, activities, selectedTournamentId, toast, blindLevels, rules, tournaments, savedPlayers]);
   // Sincronizacao instantanea em memoria sem sobrescrever o Supabase na montagem inicial
-  const didMountSyncRef = React.useRef(false);
+  const didMountSyncRef = useRef(false);
 
   useEffect(() => {
     initSupabaseRealtimeSync();
