@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
-  Activity,
   ArrowDownRight,
   ArrowUpRight,
   BarChart3,
@@ -12,11 +11,8 @@ import {
   Coffee,
   CreditCard,
   Crown,
-  Database,
   Ellipsis,
-  ExternalLink,
   FileBarChart,
-  Gamepad2,
   Grid2X2,
   Landmark,
   LayoutDashboard,
@@ -56,6 +52,12 @@ const brl = (value: number) =>
   value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 });
 const compactBrl = (value: number) =>
   value >= 1000 ? `R$ ${(value / 1000).toFixed(1).replace(".", ",")}k` : brl(value);
+
+const parseBrlInput = (raw: string) => {
+  const cleaned = raw.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
 const navGroups: { label: string; items: { id: ViewKey; label: string; icon: LucideIcon; badge?: string }[] }[] = [
   {
@@ -130,23 +132,29 @@ type ActivityItem = {
   icon: LucideIcon;
 };
 
-const chartData: { day: string; torneios: number; cash: number }[] = [];
+type TournamentStatus = "Agendado" | "Em andamento" | "Finalizado";
 
-const cashChartData: { day: string; entrada: number; saida: number }[] = [];
-
-const initialTransactions: Transaction[] = [];
-
-const initialActivities: ActivityItem[] = [];
-
-const players: string[][] = [];
-
-const cashTables: { name: string; stakes: string; players: number; capacity: number; rake: number; avg: string }[] = [];
-
-const formatTime = (seconds: number) => {
-  const mins = Math.floor(seconds / 60).toString().padStart(2, "0");
-  const secs = (seconds % 60).toString().padStart(2, "0");
-  return `${mins}:${secs}`;
+type Tournament = {
+  id: string;
+  name: string;
+  date: string;
+  time: string;
+  buyIn: number;
+  guaranteed: number;
+  stack: string;
+  blindMinutes: number;
+  status: TournamentStatus;
+  entries: number;
+  capacity: number;
 };
+
+const TOURNAMENTS_STORAGE_KEY = "controlpoker_tournaments_v1";
+
+const chartData: { day: string; torneios: number; cash: number }[] = [];
+const cashChartData: { day: string; entrada: number; saida: number }[] = [];
+const initialTransactions: Transaction[] = [];
+const initialActivities: ActivityItem[] = [];
+const players: string[][] = [];
 
 function LogoMark({ compact = false }: { compact?: boolean }) {
   return (
@@ -202,21 +210,25 @@ function Topbar({ view, onNotify, onMenu }: { view: ViewKey; onNotify: () => voi
   return <header className="topbar"><button className="mobile-menu-button topbar-icon" onClick={onMenu} aria-label="Abrir menu"><Menu size={18} /></button><div className="breadcrumb"><span>Control Poker</span><span>/</span><strong>{titleMap[view]}</strong></div><div className="topbar-actions">{searchOpen ? <div className="top-search"><Search size={15} /><input ref={searchRef} placeholder="Buscar jogador, torneio ou transação" onBlur={() => setSearchOpen(false)} /><kbd>ESC</kbd></div> : <button className="topbar-icon" onClick={() => { setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 50); }}><Search size={17} /></button>}<button className="topbar-icon notification-button" onClick={onNotify}><Bell size={17} /><span /></button><div className="topbar-date"><CalendarDays size={15} /><span>20 Nov, 2026</span><ChevronDown size={14} /></div></div></header>;
 }
 
-function OverviewView({ setView, activities }: { setView: (view: ViewKey) => void; activities: ActivityItem[] }) {
+function OverviewView({ setView, activities, tournaments }: { setView: (view: ViewKey) => void; activities: ActivityItem[]; tournaments: Tournament[] }) {
+  const totalEntries = tournaments.reduce((sum, item) => sum + item.entries, 0);
+  const totalCapacity = tournaments.reduce((sum, item) => sum + item.capacity, 0);
+  const progress = totalCapacity > 0 ? Math.min(100, Math.round((totalEntries / totalCapacity) * 100)) : 0;
+
   return <>
-    <PageIntro eyebrow="Sexta-feira, 20 de novembro de 2026" title="Bem-vindo, Admin!" description="Visão geral da gestão do seu clube de poker" action={() => setView("finance")} actionLabel="Métricas rápidas" />
+    <PageIntro eyebrow="Sexta-feira, 20 de novembro de 2026" title="Bem-vindo, Admin!" description="Visão geral da gestão do seu clube de poker" action={() => setView("tournaments")} actionLabel="Gerenciar torneios" />
     <section className="connection-section"><div className="section-header"><div><h2>Tudo conectado</h2><p>O pulso da sua operação em um único lugar.</p></div><StatusBadge tone="green">Atualizado agora</StatusBadge></div><div className="connected-grid">
       <button className="connected-card connected-finance" onClick={() => setView("finance")}><div className="connected-card-head"><IconTile icon={Landmark} tone="cyan" /><span>Financeiro</span><ArrowUpRight size={15} /></div><strong>{brl(0)}</strong><small><span className="up-text"><ArrowUpRight size={12} /> 0%</span> vs. mês anterior</small><div className="mini-spark"><i style={{ height: "32%" }} /><i style={{ height: "45%" }} /><i style={{ height: "40%" }} /><i style={{ height: "66%" }} /><i style={{ height: "58%" }} /><i style={{ height: "82%" }} /><i style={{ height: "100%" }} /></div></button>
       <div className="connection-line" />
       <button className="connected-card" onClick={() => setView("cash")}><div className="connected-card-head"><IconTile icon={Spade} tone="green" /><span>Cash Game</span><ArrowUpRight size={15} /></div><strong>0 <small>mesas ativas</small></strong><small><b>0</b> jogadores jogando agora</small><div className="seat-dots">{Array.from({ length: 8 }).map((_, i) => <span key={i} className={i < 6 ? "seat-filled" : ""} />)}</div></button>
       <div className="connection-line" />
-      <button className="connected-card" onClick={() => setView("tournaments")}><div className="connected-card-head"><IconTile icon={Trophy} tone="purple" /><span>Torneios</span><ArrowUpRight size={15} /></div><strong>0 <small>hoje</small></strong><small><b>0</b> inscrições confirmadas</small><div className="mini-progress"><span style={{ width: "0%" }} /></div><div className="progress-label"><span>Agenda do dia</span><b>0%</b></div></button>
+      <button className="connected-card" onClick={() => setView("tournaments")}><div className="connected-card-head"><IconTile icon={Trophy} tone="purple" /><span>Torneios</span><ArrowUpRight size={15} /></div><strong>{tournaments.length} <small>cadastrados</small></strong><small><b>{totalEntries}</b> inscrições confirmadas</small><div className="mini-progress"><span style={{ width: `${progress}%` }} /></div><div className="progress-label"><span>Ocupação</span><b>{progress}%</b></div></button>
       <div className="connection-line" />
       <button className="connected-card" onClick={() => setView("ranking")}><div className="connected-card-head"><IconTile icon={Crown} tone="gold" /><span>Ranking</span><ArrowUpRight size={15} /></div><strong>0 <small>jogadores</small></strong><small><b>+0</b> novas posições esta semana</small><div className="rank-avatars">{players.slice(0, 5).map(([initials, name, color]) => <Avatar key={name} initials={initials} color={color} size="sm" />)}</div></button>
       <div className="connection-line" />
       <button className="connected-card jackpot-card" onClick={() => setView("jackpot")}><div className="connected-card-head"><IconTile icon={Sparkles} tone="gold" /><span>Jackpot</span><ArrowUpRight size={15} /></div><strong>{brl(0)}</strong><small>meta do próximo nível <b>{brl(0)}</b></small><div className="mini-progress gold-progress"><span style={{ width: "0%" }} /></div><div className="progress-label"><span>Progressivo atual</span><b>0%</b></div></button>
     </div></section>
-    <div className="overview-columns"><section className="panel activity-panel"><div className="panel-heading"><div><h2>Atividades recentes</h2><p>Eventos de todos os módulos em tempo real.</p></div><button className="text-button">Ver tudo <ArrowUpRight size={14} /></button></div><div className="activity-list">{activities.length ? activities.slice(0, 5).map(activity => <div className="activity-item" key={activity.id}><div className={cn("activity-icon", `activity-${activity.tone}`)}><activity.icon size={16} /></div><div className="activity-copy"><strong>{activity.title}</strong><span>{activity.detail}</span></div><time>{activity.time}</time></div>) : <div className="empty-inline">Nenhuma atividade registrada ainda.</div>}</div></section><section className="panel consolidated-panel"><div className="panel-heading"><div><h2>Indicadores consolidados</h2><p>Desempenho acumulado do clube.</p></div><MoreHorizontal size={18} className="muted-icon" /></div><div className="consolidated-grid"><div><span className="consolidated-icon"><Users size={16} /></span><strong>0</strong><small>Total de jogadores</small><em>—</em></div><div><span className="consolidated-icon"><Spade size={16} /></span><strong>0</strong><small>Mesas jogadas no mês</small><em>—</em></div><div><span className="consolidated-icon"><Trophy size={16} /></span><strong>0</strong><small>Torneios no mês</small><em>—</em></div><div><span className="consolidated-icon"><CircleDollarSign size={16} /></span><strong>R$ 0</strong><small>Receita do mês</small><em>—</em></div></div></section></div>
+    <div className="overview-columns"><section className="panel activity-panel"><div className="panel-heading"><div><h2>Atividades recentes</h2><p>Eventos de todos os módulos em tempo real.</p></div><button className="text-button">Ver tudo <ArrowUpRight size={14} /></button></div><div className="activity-list">{activities.length ? activities.slice(0, 5).map(activity => <div className="activity-item" key={activity.id}><div className={cn("activity-icon", `activity-${activity.tone}`)}><activity.icon size={16} /></div><div className="activity-copy"><strong>{activity.title}</strong><span>{activity.detail}</span></div><time>{activity.time}</time></div>) : <div className="empty-inline">Nenhuma atividade registrada ainda.</div>}</div></section><section className="panel consolidated-panel"><div className="panel-heading"><div><h2>Indicadores consolidados</h2><p>Desempenho acumulado do clube.</p></div><MoreHorizontal size={18} className="muted-icon" /></div><div className="consolidated-grid"><div><span className="consolidated-icon"><Users size={16} /></span><strong>{totalEntries}</strong><small>Inscrições em torneios</small><em>—</em></div><div><span className="consolidated-icon"><Spade size={16} /></span><strong>0</strong><small>Mesas jogadas no mês</small><em>—</em></div><div><span className="consolidated-icon"><Trophy size={16} /></span><strong>{tournaments.length}</strong><small>Torneios cadastrados</small><em>—</em></div><div><span className="consolidated-icon"><CircleDollarSign size={16} /></span><strong>R$ 0</strong><small>Receita do mês</small><em>—</em></div></div></section></div>
   </>;
 }
 
@@ -238,12 +250,382 @@ function FinanceView({ transactions, setTransactions, activities, setActivities 
   const [category, setCategory] = useState("Receitas");
   const entries = transactions.filter(item => item.type === "Entrada").reduce((sum, item) => sum + item.value, 0);
   const exits = transactions.filter(item => item.type === "Saída").reduce((sum, item) => sum + item.value, 0);
-  const handleSubmit = (event: FormEvent) => { event.preventDefault(); const parsed = Number(value.replace(".", "").replace(",", ".")); if (!description || !parsed) return; const icon = type === "Entrada" ? ArrowDownRight : ArrowUpRight; const tone = type === "Entrada" ? "green" : "red"; const next: Transaction = { id: `tx-${Date.now()}`, date: "20/11/2026", description, category, type, value: parsed, payment: "PIX", icon, tone }; setTransactions(current => [next, ...current]); setActivities(current => [{ id: `a-${Date.now()}`, title: `${type} de ${brl(parsed)} registrada`, detail: `Financeiro · ${description}`, time: "agora", tone: type === "Entrada" ? "green" : "cyan", icon }, ...current]); setDescription(""); setValue(""); setModalOpen(false); };
+  const handleSubmit = (event: FormEvent) => { event.preventDefault(); const parsed = parseBrlInput(value); if (!description || !parsed) return; const icon = type === "Entrada" ? ArrowDownRight : ArrowUpRight; const tone = type === "Entrada" ? "green" : "red"; const next: Transaction = { id: `tx-${Date.now()}`, date: "20/11/2026", description, category, type, value: parsed, payment: "PIX", icon, tone }; setTransactions(current => [next, ...current]); setActivities(current => [{ id: `a-${Date.now()}`, title: `${type} de ${brl(parsed)} registrada`, detail: `Financeiro · ${description}`, time: "agora", tone: type === "Entrada" ? "green" : "cyan", icon }, ...current]); setDescription(""); setValue(""); setModalOpen(false); };
   return <><PageIntro eyebrow="Controle de caixa e performance" title="Gestão financeira" description="Entradas, saídas e resultado do clube em tempo real." action={() => setModalOpen(true)} actionLabel="Nova transação" /><div className="metrics-grid finance-metrics"><MetricCard label="Entradas" value={compactBrl(entries)} change="0%" detail="vs. período anterior" icon={ArrowDownRight} tone="green" /><MetricCard label="Saídas" value={compactBrl(exits)} change="0%" detail="vs. período anterior" icon={ArrowUpRight} tone="red" /><MetricCard label="Lucro" value={compactBrl(entries - exits)} change="0%" detail="margem de 0%" icon={BarChart3} tone="cyan" /><MetricCard label="Despesas" value={compactBrl(exits)} change="0%" detail="sem registros" icon={ReceiptText} tone="orange" /><MetricCard label="Caixa" value={compactBrl(entries - exits)} detail="saldo disponível" icon={Landmark} tone="purple" /></div><section className="panel finance-chart-panel"><div className="panel-heading"><div><h2>Evolução das entradas e saídas</h2><p>Visão consolidada dos últimos 7 meses.</p></div><div className="segmented-control">{["Mensal", "Semanal", "Diário"].map(item => <button key={item} className={grouping === item ? "segmented-active" : ""} onClick={() => setGrouping(item)}>{item}</button>)}</div></div><div className="chart-wrap finance-chart-wrap"><ResponsiveContainer width="100%" height="100%"><AreaChart data={cashChartData} margin={{ top: 12, right: 10, left: -20, bottom: 0 }}><defs><linearGradient id="entradaGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#071E36" stopOpacity={0.2} /><stop offset="100%" stopColor="#071E36" stopOpacity={0.01} /></linearGradient><linearGradient id="saidaGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#00A8C6" stopOpacity={0.25} /><stop offset="100%" stopColor="#00A8C6" stopOpacity={0.01} /></linearGradient></defs><CartesianGrid stroke="#E7EDF3" vertical={false} /><XAxis dataKey="day" tick={{ fontSize: 11, fill: "#8190A5" }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 11, fill: "#8190A5" }} axisLine={false} tickLine={false} tickFormatter={value => `${value / 1000}k`} /><RechartsTooltip formatter={(value: number) => brl(value)} contentStyle={{ borderRadius: 12, border: "1px solid #E2E8F0" }} /><Area type="monotone" dataKey="entrada" name="Entradas" stroke="#071E36" strokeWidth={2.5} fill="url(#entradaGradient)" /><Area type="monotone" dataKey="saida" name="Saídas" stroke="#00A8C6" strokeWidth={2.5} fill="url(#saidaGradient)" /></AreaChart></ResponsiveContainer></div></section><section className="panel transactions-panel"><div className="panel-heading"><div><h2>Últimas transações</h2><p>Registros financeiros mais recentes.</p></div><button className="text-button" onClick={() => setModalOpen(true)}>+ Nova transação</button></div><div className="transaction-table"><div className="transaction-row transaction-head"><span>Data</span><span>Descrição</span><span>Categoria</span><span>Tipo</span><span>Valor</span><span>Pagamento</span><span /></div>{transactions.length ? transactions.slice(0, 6).map(transaction => <div className="transaction-row" key={transaction.id}><span className="table-date">{transaction.date}</span><span className="transaction-description"><IconTile icon={transaction.icon} tone={transaction.tone} /><strong>{transaction.description}</strong></span><span><StatusBadge tone="neutral" dot={false}>{transaction.category}</StatusBadge></span><span><StatusBadge tone={transaction.type === "Entrada" ? "green" : "red"}>{transaction.type}</StatusBadge></span><strong className={transaction.type === "Entrada" ? "money-in" : "money-out"}>{transaction.type === "Entrada" ? "+" : "-"} {brl(transaction.value)}</strong><span className="payment-method"><CreditCard size={13} /> {transaction.payment}</span><button className="icon-button"><Ellipsis size={17} /></button></div>) : <div className="empty-inline">Nenhuma transação registrada.</div>}</div></section>{modalOpen && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setModalOpen(false); }}><form className="modal-card" onSubmit={handleSubmit}><div className="modal-heading"><div><div className="eyebrow">Lançamento manual</div><h2>Nova transação</h2><p>Registre uma entrada ou saída no caixa.</p></div><button type="button" className="icon-button" onClick={() => setModalOpen(false)}><X size={18} /></button></div><label>Descrição<input value={description} onChange={event => setDescription(event.target.value)} placeholder="Ex.: Rake Mesa 05" required /></label><div className="form-grid"><label>Valor (R$)<input value={value} onChange={event => setValue(event.target.value)} placeholder="0,00" inputMode="decimal" required /></label><label>Categoria<select value={category} onChange={event => setCategory(event.target.value)}><option>Receitas</option><option>Despesas</option><option>Torneios</option><option>Cash</option><option>Bar</option></select></label></div><label>Tipo<select value={type} onChange={event => setType(event.target.value as "Entrada" | "Saída")}><option>Entrada</option><option>Saída</option></select></label><div className="modal-actions"><Button type="button" variant="outline" onClick={() => setModalOpen(false)}>Cancelar</Button><Button type="submit" className="primary-button">Salvar transação</Button></div></form></div>}</>;
 }
 
-function TournamentsView({ setView }: { setView: (view: ViewKey) => void }) {
-  return <><PageIntro eyebrow="Operação de eventos" title="Torneios" description="Acompanhe inscrições, premiações e andamento dos eventos." action={() => setView("overview")} actionLabel="Voltar para visão geral" /><section className="panel empty-state"><div className="empty-orbit"><Trophy size={28} /></div><h2>Nenhum torneio cadastrado</h2><p>Os dados de torneios foram limpos. Crie o primeiro evento para começar a operação.</p><div className="empty-actions"><Button className="primary-button" onClick={() => setView("overview")}><Plus size={15} /> Criar primeiro torneio</Button></div></section></>;
+function TournamentsView({
+  setView,
+  tournaments,
+  setTournaments,
+  setActivities,
+  setToast,
+  selectedId,
+  setSelectedId,
+}: {
+  setView: (view: ViewKey) => void;
+  tournaments: Tournament[];
+  setTournaments: React.Dispatch<React.SetStateAction<Tournament[]>>;
+  setActivities: React.Dispatch<React.SetStateAction<ActivityItem[]>>;
+  setToast: (message: string) => void;
+  selectedId: string | null;
+  setSelectedId: (id: string | null) => void;
+}) {
+  const [modalOpen, setModalOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [date, setDate] = useState("20/11/2026");
+  const [time, setTime] = useState("20:00");
+  const [buyIn, setBuyIn] = useState("150,00");
+  const [guaranteed, setGuaranteed] = useState("15.000,00");
+  const [stack, setStack] = useState("25.000");
+  const [blindMinutes, setBlindMinutes] = useState("20");
+  const [capacity, setCapacity] = useState("80");
+  const [status, setStatus] = useState<TournamentStatus>("Agendado");
+
+  const selectedTournament =
+    tournaments.find(item => item.id === selectedId) ?? tournaments[0] ?? null;
+
+  const statusTone = (st: TournamentStatus) =>
+    st === "Em andamento" ? "green" : st === "Agendado" ? "cyan" : "neutral";
+
+  const handleCreateTournament = (event: FormEvent) => {
+    event.preventDefault();
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+
+    const created: Tournament = {
+      id: `trn-${Date.now()}`,
+      name: trimmedName,
+      date: date.trim() || "20/11/2026",
+      time: time.trim() || "20:00",
+      buyIn: parseBrlInput(buyIn),
+      guaranteed: parseBrlInput(guaranteed),
+      stack: stack.trim() || "25.000",
+      blindMinutes: Math.max(5, Number(blindMinutes) || 20),
+      status,
+      entries: 0,
+      capacity: Math.max(9, Number(capacity) || 80),
+    };
+
+    setTournaments(current => [created, ...current]);
+    setSelectedId(created.id);
+    setActivities(current => [
+      {
+        id: `act-${Date.now()}`,
+        title: `Torneio "${created.name}" criado`,
+        detail: `Buy-in ${brl(created.buyIn)} · GTD ${brl(created.guaranteed)}`,
+        time: "agora",
+        tone: "purple",
+        icon: Trophy,
+      },
+      ...current,
+    ]);
+    setToast(`Torneio "${created.name}" criado com sucesso!`);
+    setName("");
+    setModalOpen(false);
+  };
+
+  const handleRegisterEntry = (id: string) => {
+    setTournaments(current =>
+      current.map(item =>
+        item.id === id ? { ...item, entries: item.entries + 1 } : item
+      )
+    );
+    setToast("Nova inscrição registrada no torneio!");
+  };
+
+  const handleToggleStatus = (id: string) => {
+    setTournaments(current =>
+      current.map(item => {
+        if (item.id !== id) return item;
+        const nextStatus: TournamentStatus =
+          item.status === "Agendado"
+            ? "Em andamento"
+            : item.status === "Em andamento"
+            ? "Finalizado"
+            : "Agendado";
+        setToast(`Status alterado para: ${nextStatus}`);
+        return { ...item, status: nextStatus };
+      })
+    );
+  };
+
+  const handleRemoveTournament = (id: string) => {
+    setTournaments(current => current.filter(item => item.id !== id));
+    if (selectedId === id) setSelectedId(null);
+    setToast("Torneio removido.");
+  };
+
+  return (
+    <>
+      <PageIntro
+        eyebrow="Operação de eventos"
+        title="Torneios"
+        description="Acompanhe inscrições, premiações e andamento dos eventos."
+        action={() => setModalOpen(true)}
+        actionLabel="Novo torneio"
+      />
+
+      {tournaments.length === 0 ? (
+        <section className="panel empty-state">
+          <div className="empty-orbit">
+            <Trophy size={28} />
+          </div>
+          <h2>Nenhum torneio cadastrado</h2>
+          <p>Crie o primeiro evento do clube para gerenciar inscrições, premiações e o relógio de blinds.</p>
+          <div className="empty-actions">
+            <Button className="primary-button" onClick={() => setModalOpen(true)}>
+              <Plus size={15} /> Criar primeiro torneio
+            </Button>
+          </div>
+        </section>
+      ) : (
+        <div className="tournament-layout">
+          <div className="tournament-list">
+            {tournaments.map(item => {
+              const pct = Math.min(100, Math.round((item.entries / item.capacity) * 100));
+              const isSelected = selectedTournament?.id === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={cn("tournament-card", isSelected && "tournament-selected")}
+                  onClick={() => setSelectedId(item.id)}
+                >
+                  <div className="tournament-card-top">
+                    <StatusBadge tone={statusTone(item.status)}>{item.status}</StatusBadge>
+                    <span className="eyebrow">{item.date} · {item.time}</span>
+                  </div>
+                  <h3>{item.name}</h3>
+                  <div className="tournament-meta">
+                    <span><Users size={12} /> {item.entries}/{item.capacity} inscritos</span>
+                    <span><Clock3 size={12} /> Blinds {item.blindMinutes}m</span>
+                  </div>
+                  <div className="mini-progress">
+                    <span style={{ width: `${pct}%` }} />
+                  </div>
+                  <div className="tournament-card-bottom">
+                    <span>Buy-in: {brl(item.buyIn)}</span>
+                    <strong>GTD {brl(item.guaranteed)}</strong>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {selectedTournament && (
+            <section className="panel tournament-detail">
+              <div className="detail-cover">
+                <div className="detail-kicker">
+                  <StatusBadge tone={statusTone(selectedTournament.status)}>
+                    {selectedTournament.status}
+                  </StatusBadge>
+                  <span>{selectedTournament.date} ÀS {selectedTournament.time}</span>
+                </div>
+                <h2>{selectedTournament.name}</h2>
+                <p>Stack inicial de {selectedTournament.stack} fichas · Níveis de {selectedTournament.blindMinutes} minutos</p>
+
+                <div className="detail-stats">
+                  <div>
+                    <span>BUY-IN</span>
+                    <strong>{brl(selectedTournament.buyIn)}</strong>
+                    <small>Entrada principal</small>
+                  </div>
+                  <div>
+                    <span>GARANTIDO</span>
+                    <strong>{brl(selectedTournament.guaranteed)}</strong>
+                    <small>Arrecadado: {brl(selectedTournament.buyIn * selectedTournament.entries)}</small>
+                  </div>
+                  <div>
+                    <span>INSCRITOS</span>
+                    <strong>{selectedTournament.entries} / {selectedTournament.capacity}</strong>
+                    <small>Vagas ocupadas</small>
+                  </div>
+                </div>
+              </div>
+
+              <div className="detail-actions">
+                <Button className="primary-button" onClick={() => handleRegisterEntry(selectedTournament.id)}>
+                  <Plus size={14} /> Registrar entrada
+                </Button>
+                <Button variant="outline" onClick={() => handleToggleStatus(selectedTournament.id)}>
+                  {selectedTournament.status === "Em andamento" ? <Pause size={14} /> : <Play size={14} />}
+                  Alterar status
+                </Button>
+                <Button variant="outline" onClick={() => setView("tv-clock")}>
+                  <MonitorPlay size={14} /> Clocker (Modo TV)
+                </Button>
+                <Button variant="outline" onClick={() => setView("tv-draw")}>
+                  <Tv2 size={14} /> Sorteio de Mesas
+                </Button>
+                <Button variant="outline" onClick={() => handleRemoveTournament(selectedTournament.id)}>
+                  <X size={14} /> Excluir
+                </Button>
+              </div>
+
+              <div className="detail-tabs">
+                <span className="tab-active">Resumo da operação</span>
+                <span>Estrutura de blinds</span>
+                <span>Premiação</span>
+              </div>
+
+              <div className="detail-feed">
+                <div>
+                  <div className="feed-icon"><Trophy size={15} /></div>
+                  <p>
+                    <strong>Premiação garantida configurada em {brl(selectedTournament.guaranteed)}</strong>
+                    <small>Com {selectedTournament.entries} entradas, o arrecadado atual é {brl(selectedTournament.buyIn * selectedTournament.entries)}</small>
+                  </p>
+                  <time>{selectedTournament.date}</time>
+                </div>
+                <div>
+                  <div className="feed-icon feed-icon-gold"><Clock3 size={15} /></div>
+                  <p>
+                    <strong>Estrutura de {selectedTournament.blindMinutes} minutos por nível</strong>
+                    <small>Stack inicial de {selectedTournament.stack} fichas por inscrição</small>
+                  </p>
+                  <time>{selectedTournament.time}</time>
+                </div>
+              </div>
+            </section>
+          )}
+        </div>
+      )}
+
+      {modalOpen && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setModalOpen(false);
+          }}
+        >
+          <form className="modal-card" onSubmit={handleCreateTournament}>
+            <div className="modal-heading">
+              <div>
+                <div className="eyebrow">Operação de eventos</div>
+                <h2>Criar novo torneio</h2>
+                <p>Configure os dados principais do evento para abrir inscrições.</p>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setModalOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <label>
+              Nome do torneio
+              <input
+                value={name}
+                onChange={event => setName(event.target.value)}
+                placeholder="Ex.: Main Event Sexta 15K GTD"
+                required
+              />
+            </label>
+
+            <div className="form-grid">
+              <label>
+                Data
+                <input
+                  value={date}
+                  onChange={event => setDate(event.target.value)}
+                  placeholder="DD/MM/AAAA"
+                  required
+                />
+              </label>
+              <label>
+                Horário
+                <input
+                  value={time}
+                  onChange={event => setTime(event.target.value)}
+                  placeholder="20:00"
+                  required
+                />
+              </label>
+            </div>
+
+            <div className="form-grid">
+              <label>
+                Buy-in (R$)
+                <input
+                  value={buyIn}
+                  onChange={event => setBuyIn(event.target.value)}
+                  placeholder="150,00"
+                  inputMode="decimal"
+                  required
+                />
+              </label>
+              <label>
+                Garantido GTD (R$)
+                <input
+                  value={guaranteed}
+                  onChange={event => setGuaranteed(event.target.value)}
+                  placeholder="15.000,00"
+                  inputMode="decimal"
+                  required
+                />
+              </label>
+            </div>
+
+            <div className="form-grid">
+              <label>
+                Stack inicial
+                <input
+                  value={stack}
+                  onChange={event => setStack(event.target.value)}
+                  placeholder="25.000"
+                  required
+                />
+              </label>
+              <label>
+                Blinds (minutos)
+                <input
+                  type="number"
+                  min={5}
+                  max={120}
+                  value={blindMinutes}
+                  onChange={event => setBlindMinutes(event.target.value)}
+                  required
+                />
+              </label>
+            </div>
+
+            <div className="form-grid">
+              <label>
+                Capacidade máxima
+                <input
+                  type="number"
+                  min={9}
+                  max={1000}
+                  value={capacity}
+                  onChange={event => setCapacity(event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Status inicial
+                <select
+                  value={status}
+                  onChange={event => setStatus(event.target.value as TournamentStatus)}
+                >
+                  <option value="Agendado">Agendado</option>
+                  <option value="Em andamento">Em andamento</option>
+                  <option value="Finalizado">Finalizado</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="modal-actions">
+              <Button type="button" variant="outline" onClick={() => setModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" className="primary-button">
+                Salvar torneio
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
+    </>
+  );
 }
 
 function CashView({ setView }: { setView: (view: ViewKey) => void }) {
@@ -263,8 +645,47 @@ function SimpleModule({ view, setView }: { view: ViewKey; setView: (view: ViewKe
   return <><PageIntro eyebrow={current.eyebrow} title={current.title} description={current.description} action={() => setView("overview")} actionLabel="Voltar para visão geral" /><div className="simple-hero"><div className={cn("simple-hero-icon", `icon-${current.accent}`)}><Icon size={30} /></div><div><StatusBadge tone={current.accent === "orange" ? "orange" : current.accent === "gold" ? "gold" : current.accent === "purple" ? "cyan" : "cyan"}>Módulo conectado</StatusBadge><h2>Dados limpos</h2><p>Este módulo está pronto para receber novos registros. Nenhum dado anterior permanece gravado.</p></div><div className="simple-hero-action"><Button className="primary-button" onClick={() => setView("overview")}>Ver visão geral <ArrowUpRight size={15} /></Button></div></div><div className="simple-stats">{current.stats.map(([label, value, detail]) => <div className="panel simple-stat" key={label}><span className="eyebrow">{label}</span><strong>{value}</strong><small>{detail}</small></div>)}</div><section className="panel empty-state"><div className="empty-orbit"><Icon size={28} /></div><h2>Nenhum registro encontrado</h2><p>O módulo foi limpo e está pronto para uma nova operação.</p><div className="empty-actions"><Button className="primary-button" onClick={() => setView("overview")}><Grid2X2 size={15} /> Voltar ao hub</Button></div></section></>;
 }
 
-function TvView({ mode, setView }: { mode: "clock" | "draw"; setView: (view: ViewKey) => void }) {
-  return <div className="tv-screen"><div className="tv-topbar"><button className="tv-brand" onClick={() => setView("overview")}><LogoMark /><span className="tv-brand-separator" /><span className="tv-event-label">MODO TV <small>SEM EVENTO SELECIONADO</small></span></button><button className="tv-exit" onClick={() => setView("overview")}><X size={16} /> Sair da TV</button></div><div className="empty-state tv-empty-state"><div className="empty-orbit">{mode === "clock" ? <Clock3 size={28} /> : <Grid2X2 size={28} />}</div><h2>{mode === "clock" ? "Nenhum torneio no Clocker" : "Nenhum sorteio disponível"}</h2><p>Os dados foram limpos. Selecione ou crie um torneio para ativar esta tela.</p><div className="empty-actions"><Button className="primary-button" onClick={() => setView("tournaments")}><Trophy size={15} /> Ir para torneios</Button></div></div><div className="tv-footer-hint"><span>CONTROL POKER</span><span>Gestão de clubes · aguardando novos dados</span></div></div>;
+function TvView({ mode, setView, tournament }: { mode: "clock" | "draw"; setView: (view: ViewKey) => void; tournament: Tournament | null }) {
+  return (
+    <div className="tv-screen">
+      <div className="tv-topbar">
+        <button className="tv-brand" onClick={() => setView("overview")}>
+          <LogoMark />
+          <span className="tv-brand-separator" />
+          <span className="tv-event-label">
+            MODO TV <small>{tournament ? tournament.name.toUpperCase() : "SEM EVENTO SELECIONADO"}</small>
+          </span>
+        </button>
+        <button className="tv-exit" onClick={() => setView("overview")}>
+          <X size={16} /> Sair da TV
+        </button>
+      </div>
+      <div className="empty-state tv-empty-state">
+        <div className="empty-orbit">{mode === "clock" ? <Clock3 size={28} /> : <Grid2X2 size={28} />}</div>
+        <h2>
+          {tournament
+            ? `${tournament.name} · ${mode === "clock" ? `Blinds ${tournament.blindMinutes} min` : `${tournament.entries} inscritos`}`
+            : mode === "clock"
+            ? "Nenhum torneio no Clocker"
+            : "Nenhum sorteio disponível"}
+        </h2>
+        <p>
+          {tournament
+            ? `Buy-in ${brl(tournament.buyIn)} · Garantido ${brl(tournament.guaranteed)} · Stack ${tournament.stack}`
+            : "Selecione ou crie um torneio para ativar esta tela."}
+        </p>
+        <div className="empty-actions">
+          <Button className="primary-button" onClick={() => setView("tournaments")}>
+            <Trophy size={15} /> Ir para torneios
+          </Button>
+        </div>
+      </div>
+      <div className="tv-footer-hint">
+        <span>CONTROL POKER</span>
+        <span>Gestão de clubes · Modo TV</span>
+      </div>
+    </div>
+  );
 }
 
 export default function Home() {
@@ -273,9 +694,57 @@ export default function Home() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions);
   const [activities, setActivities] = useState<ActivityItem[]>(initialActivities);
+  const [tournaments, setTournaments] = useState<Tournament[]>(() => {
+    try {
+      const saved = localStorage.getItem(TOURNAMENTS_STORAGE_KEY);
+      return saved ? (JSON.parse(saved) as Tournament[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [selectedTournamentId, setSelectedTournamentId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  useEffect(() => { if (!toast) return; const timeout = window.setTimeout(() => setToast(null), 3200); return () => window.clearTimeout(timeout); }, [toast]);
-  const content = useMemo(() => { if (view === "overview") return <OverviewView setView={setView} activities={activities} />; if (view === "dashboard") return <DashboardView setView={setView} />; if (view === "finance") return <FinanceView transactions={transactions} setTransactions={setTransactions} activities={activities} setActivities={setActivities} />; if (view === "tournaments") return <TournamentsView setView={setView} />; if (view === "cash") return <CashView setView={setView} />; if (view === "tv-clock") return <TvView mode="clock" setView={setView} />; if (view === "tv-draw") return <TvView mode="draw" setView={setView} />; return <SimpleModule view={view} setView={setView} />; }, [activities, transactions, view]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TOURNAMENTS_STORAGE_KEY, JSON.stringify(tournaments));
+    } catch {
+      // ignore storage errors
+    }
+  }, [tournaments]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timeout = window.setTimeout(() => setToast(null), 3200);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+
+  const activeTournament =
+    tournaments.find(item => item.id === selectedTournamentId) ?? tournaments[0] ?? null;
+
+  const content = useMemo(() => {
+    if (view === "overview") return <OverviewView setView={setView} activities={activities} tournaments={tournaments} />;
+    if (view === "dashboard") return <DashboardView setView={setView} />;
+    if (view === "finance") return <FinanceView transactions={transactions} setTransactions={setTransactions} activities={activities} setActivities={setActivities} />;
+    if (view === "tournaments") {
+      return (
+        <TournamentsView
+          setView={setView}
+          tournaments={tournaments}
+          setTournaments={setTournaments}
+          setActivities={setActivities}
+          setToast={setToast}
+          selectedId={selectedTournamentId}
+          setSelectedId={setSelectedTournamentId}
+        />
+      );
+    }
+    if (view === "cash") return <CashView setView={setView} />;
+    if (view === "tv-clock") return <TvView mode="clock" setView={setView} tournament={activeTournament} />;
+    if (view === "tv-draw") return <TvView mode="draw" setView={setView} tournament={activeTournament} />;
+    return <SimpleModule view={view} setView={setView} />;
+  }, [activeTournament, activities, selectedTournamentId, tournaments, transactions, view]);
+
   if (view === "tv-clock" || view === "tv-draw") return content;
   const navigate = (nextView: ViewKey) => { setView(nextView); setMobileOpen(false); };
   return <div className="app-shell"><Sidebar view={view} setView={navigate} collapsed={collapsed} setCollapsed={setCollapsed} mobileOpen={mobileOpen} /><div className="main-shell"><Topbar view={view} onMenu={() => setMobileOpen(true)} onNotify={() => setToast("Você está em dia: nenhuma nova notificação.")} /><main className="content-area">{content}</main></div>{toast && <div className="toast"><span className="toast-check">✓</span>{toast}</div>}</div>;
