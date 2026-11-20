@@ -1,3 +1,4 @@
+import { pullStateFromSupabase } from "@/lib/supabaseSync";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
@@ -184,6 +185,19 @@ function playBeep(freq = 880, durationMs = 220) {
 }
 
 export function TvClockView() {
+  const [, setLiveSyncTick] = useState(0);
+  useEffect(() => {
+    void pullStateFromSupabase(true);
+    const onSynced = () => setLiveSyncTick(t => t + 1);
+    window.addEventListener("pokergestor:supabase-synced", onSynced);
+    const pollId = window.setInterval(() => {
+      void pullStateFromSupabase(true);
+    }, 2000);
+    return () => {
+      window.removeEventListener("pokergestor:supabase-synced", onSynced);
+      window.clearInterval(pollId);
+    };
+  }, []);
   const club = useClub() as unknown as Record<string, unknown>;
   const setView = club.setView as (view: string) => void;
   const tournaments = (Array.isArray(club.tournaments) ? club.tournaments : []) as Array<

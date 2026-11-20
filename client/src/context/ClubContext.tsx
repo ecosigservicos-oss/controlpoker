@@ -148,7 +148,15 @@ export function ClubProvider({ children }: { children: ReactNode }) {
 
   const activeTournament =
     tournaments.find(item => item.id === selectedTournamentId) ?? tournaments[0] ?? null;
-  // Sincronizacao instantanea em memoria entre Caixa, Torneios e Clocker TV (sem F5)
+useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void pushStateToSupabase({ view, transactions, activities, selectedTournamentId, toast, blindLevels, rules, tournaments, savedPlayers });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [view, transactions, activities, selectedTournamentId, toast, blindLevels, rules, tournaments, savedPlayers]);
+  // Sincronizacao instantanea em memoria sem sobrescrever o Supabase na montagem inicial
+  const didMountSyncRef = React.useRef(false);
+
   useEffect(() => {
     initSupabaseRealtimeSync();
 
@@ -174,11 +182,16 @@ export function ClubProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!didMountSyncRef.current) {
+      didMountSyncRef.current = true;
+      return;
+    }
     const timer = window.setTimeout(() => {
       void pushStateToSupabase({ view, transactions, activities, selectedTournamentId, toast, blindLevels, rules, tournaments, savedPlayers });
     }, 150);
     return () => window.clearTimeout(timer);
   }, [view, transactions, activities, selectedTournamentId, toast, blindLevels, rules, tournaments, savedPlayers]);
+
 
 return (
     <ClubContext.Provider

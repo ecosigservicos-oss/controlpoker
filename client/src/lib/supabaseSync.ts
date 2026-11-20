@@ -216,7 +216,8 @@ async function upsertNormalizedTables(primary: Record<string, unknown>): Promise
 
 let isPushing = false;
 let isApplyingRemote = false;
-let lastSyncedPayloadHash = "";
+let hasCompletedInitialPull = false;
+let lastAppliedRemoteHash = "";
 let lastKnownLiveContext: Record<string, unknown> | null = null;
 let localChannel: BroadcastChannel | null = null;
 let realtimeSocket: WebSocket | null = null;
@@ -290,16 +291,19 @@ function broadcastRealtimeSignal(snapshot: Record<string, unknown>, updatedAt: s
 }
 
 export async function pushStateToSupabase(
-  explicitLiveContext?: Record<string, unknown>
+  explicitLiveContext?: Record<string, unknown>,
+  forcePush = false
 ): Promise<boolean> {
   if (isPushing || isApplyingRemote) return false;
+  if (!hasCompletedInitialPull && !forcePush) return false;
+
   isPushing = true;
   try {
     const snapshot = collectLocalStateSnapshot();
-    if (explicitLiveContext) {
+    if (explicitLiveContext && Object.keys(explicitLiveContext).length > 0) {
       lastKnownLiveContext = explicitLiveContext;
     }
-    if (lastKnownLiveContext) {
+    if (lastKnownLiveContext && Object.keys(lastKnownLiveContext).length > 0) {
       snapshot.__liveContext = lastKnownLiveContext;
     }
 
@@ -309,7 +313,7 @@ export async function pushStateToSupabase(
     }
 
     const payloadHash = JSON.stringify(snapshot);
-    lastSyncedPayloadHash = payloadHash;
+    lastAppliedRemoteHash = payloadHash;
 
     const nowIso = new Date().toISOString();
     window.localStorage.setItem(SYNC_META_KEY, nowIso);
@@ -353,27 +357,33 @@ export async function pullStateFromSupabase(
         headers: buildHeaders({ "Cache-Control": "no-cache" }),
       }
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      hasCompletedInitialPull = true;
+      return null;
+    }
     const rows = (await res.json()) as Array<{
       state_json?: Record<string, unknown>;
       updated_at?: string;
     }>;
     const row = rows[0];
     const remoteState = row?.state_json;
+    hasCompletedInitialPull = true;
+
     if (!remoteState || Object.keys(remoteState).length === 0) {
-      await pushStateToSupabase();
+      await pushStateToSupabase(undefined, true);
       return null;
     }
 
     const remoteHash = JSON.stringify(remoteState);
-    if (!force && remoteHash === lastSyncedPayloadHash) {
+    if (!force && remoteHash === lastAppliedRemoteHash) {
       return null;
     }
 
-    lastSyncedPayloadHash = remoteHash;
+    lastAppliedRemoteHash = remoteHash;
     applySnapshotEverywhere(remoteState, row?.updated_at);
     return findPrimaryStateObject(remoteState);
   } catch {
+    hasCompletedInitialPull = true;
     return null;
   }
 }
@@ -425,7 +435,7 @@ function connectSupabaseRealtimeWebSocket(): void {
           payload?: Record<string, unknown>;
         };
         if (msg.event === "broadcast" || msg.event === "postgres_changes") {
-          void pullStateFromSupabase(false);
+          void pullStateFromSupabase(true);
         }
       } catch {
         // Ignore malformed messages
@@ -461,7 +471,7 @@ export function initSupabaseRealtimeSync(): void {
         updatedAt?: string;
       };
       if (data?.sender === tabClientId || !data?.snapshot) return;
-      lastSyncedPayloadHash = JSON.stringify(data.snapshot);
+      lastAppliedRemoteHash = JSON.stringify(data.snapshot);
       applySnapshotEverywhere(data.snapshot, data.updatedAt);
     };
   }
@@ -478,7 +488,7 @@ export function initSupabaseRealtimeSync(): void {
   });
 
   window.addEventListener("focus", () => {
-    void pullStateFromSupabase(false);
+    void pullStateFromSupabase(true);
   });
 
   const origSetItem = window.localStorage.setItem.bind(window.localStorage);
@@ -486,7 +496,7 @@ export function initSupabaseRealtimeSync(): void {
 
   window.localStorage.setItem = (key: string, value: string) => {
     origSetItem(key, value);
-    if (isApplyingRemote || key === SYNC_META_KEY) return;
+    if (isApplyingRemote || key === SYNC_META_KEY || !hasCompletedInitialPull) return;
     if (debounceTimer) window.clearTimeout(debounceTimer);
     debounceTimer = window.setTimeout(() => {
       void pushStateToSupabase();
