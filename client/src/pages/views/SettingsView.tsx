@@ -1,4 +1,4 @@
-﻿import { ArrowUpRight, Grid2X2, Settings2 } from "lucide-react";
+import { ArrowUpRight, Grid2X2, Settings2 } from "lucide-react";
 import { useClub } from "@/context/ClubContext";
 import { PageIntro, StatusBadge } from "@/components/club/SharedUI";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,7 @@ export function SettingsView() {
         <div className="panel simple-stat">
           <span className="eyebrow">Unidades</span>
           <strong>1</strong>
-          <small>Poker Club SP</small>
+          <small>PokerGestor</small>
         </div>
         <div className="panel simple-stat">
           <span className="eyebrow">Usuários admin</span>

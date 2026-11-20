@@ -1,4 +1,4 @@
-﻿import {
+import {
   ChevronDown,
   CircleDollarSign,
   Clock3,
@@ -131,7 +131,7 @@ export function Sidebar({
         <button className="user-switcher">
           <Avatar initials="AD" color="#00D4FF" size="sm" />
           <span>
-            <strong>Poker Club SP</strong>
+            <strong>PokerGestor</strong>
             <small>Admin · Unidade principal</small>
           </span>
           <ChevronDown size={15} />

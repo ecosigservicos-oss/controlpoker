@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ChevronUp,
   Lock,
@@ -86,7 +86,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
       const clubTitleEl = leaves.find(el => {
         const txt = (el.textContent ?? "").trim();
-        return txt === "Poker Club SP" || el.dataset.authUserTitle === "true";
+        return txt === "PokerGestor" || el.dataset.authUserTitle === "true";
       });
 
       const subTitleEl = leaves.find(el => {
@@ -101,7 +101,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       const anchorEl = clubTitleEl ?? subTitleEl;
       if (!anchorEl) return;
 
-      const targetTitle = isAdmin ? "Poker Club SP" : currentUser.name;
+      const targetTitle = isAdmin ? "PokerGestor" : currentUser.name;
       if (clubTitleEl && clubTitleEl.textContent !== targetTitle) {
         clubTitleEl.dataset.authUserTitle = "true";
         clubTitleEl.textContent = targetTitle;

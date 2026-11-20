@@ -1,4 +1,4 @@
-﻿import type { ReactNode } from "react";
+import type { ReactNode } from "react";
 import { ArrowUpRight, Plus, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -31,7 +31,7 @@ export function LogoMark({ compact = false }: { compact?: boolean }) {
       {!compact && (
         <div>
           <div className="brand-name">
-            CONTROL <strong>POKER</strong>
+            POKER <strong>GESTOR</strong>
           </div>
           <div className="brand-caption">GESTÃO DE CLUBES</div>
         </div>
