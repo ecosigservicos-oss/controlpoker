@@ -64,7 +64,15 @@ export function ClubProvider({ children }: { children: ReactNode }) {
   const [tournaments, setTournaments] = useState<Tournament[]>(() => {
     try {
       const saved = localStorage.getItem(TOURNAMENTS_STORAGE_KEY);
-      return saved ? (JSON.parse(saved) as Tournament[]) : [];
+      if (!saved) return [];
+      const parsed = JSON.parse(saved) as Tournament[];
+      return parsed.map(t => ({
+        ...t,
+        stack: t.stack === "1500" ? "15.000" : t.stack,
+        registrations: (t.registrations ?? []).map(r =>
+          r.entryType === "Buy-in" && r.chips === "1500" ? { ...r, chips: "15.000" } : r
+        ),
+      }));
     } catch {
       return [];
     }
