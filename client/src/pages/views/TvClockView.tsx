@@ -115,6 +115,50 @@ function formatBRL(n: number): string {
   });
 }
 
+function playLevelChangeAlert() {
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    if (ctx.state === "suspended") {
+      void ctx.resume();
+    }
+
+    const now = ctx.currentTime;
+    const pulses = [
+      { start: 0.0, duration: 0.85, freq: 880 },
+      { start: 1.0, duration: 0.85, freq: 880 },
+      { start: 2.0, duration: 0.85, freq: 880 },
+      { start: 3.0, duration: 0.95, freq: 1174.66 },
+    ];
+
+    for (const p of pulses) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(p.freq, now + p.start);
+
+      gain.gain.setValueAtTime(0.001, now + p.start);
+      gain.gain.exponentialRampToValueAtTime(0.28, now + p.start + 0.04);
+      gain.gain.setValueAtTime(0.28, now + p.start + p.duration - 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + p.start + p.duration);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + p.start);
+      osc.stop(now + p.start + p.duration);
+    }
+
+    window.setTimeout(() => {
+      void ctx.close();
+    }, 4200);
+  } catch {
+    // Ignore audio restrictions
+  }
+}
+
 function playBeep(freq = 880, durationMs = 220) {
   try {
     const AudioCtx =
@@ -323,10 +367,11 @@ export function TvClockView() {
         if (prev <= 1) {
           const nextIdx = levelIndexRef.current + 1;
           if (nextIdx < blindLevels.length) {
-            if (soundEnabled) playBeep(980, 420);
+            if (soundEnabled) playLevelChangeAlert();
             setLevelIndex(nextIdx);
             return blindLevels[nextIdx].durationMinutes * 60;
           }
+          if (soundEnabled) playLevelChangeAlert();
           setIsRunning(false);
           return 0;
         }
@@ -979,6 +1024,28 @@ export function TvClockView() {
             }}
           >
             {soundEnabled ? <Volume2 size={17} /> : <VolumeX size={17} />}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => playLevelChangeAlert()}
+            title="Testar alerta sonoro de 4 segundos"
+            style={{
+              height: 44,
+              padding: "0 12px",
+              borderRadius: 12,
+              border: "1px solid rgba(56, 189, 248, 0.3)",
+              background: "rgba(15, 23, 42, 0.7)",
+              color: "#7DD3FC",
+              fontSize: 12.5,
+              fontWeight: 700,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              cursor: "pointer",
+            }}
+          >
+            Testar som (4s)
           </button>
         </div>
 
