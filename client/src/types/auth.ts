@@ -8,7 +8,7 @@
   | "reports"
   | "members"
   | "ranking"
-  | "tv-draw"
+  | "tv-clock" | "tv-draw"
   | "satellites"
   | "blinds"
   | "jackpot"
@@ -105,7 +105,7 @@ export const APP_MODULES: AppModuleInfo[] = [
     description: "Pontuação e classificação da temporada.",
   },
   {
-    key: "tv-draw",
+    key: "tv-clock", "tv-draw",
     label: "Sorteios / Clocker (Modo TV)",
     sidebarLabels: ["Sorteios (Modo TV)", "Clocker (Modo TV)"],
     category: "Operação",
@@ -154,7 +154,7 @@ export const ROLE_PRESETS: {
     id: "floor",
     label: "Diretor de Torneio",
     jobTitle: "Diretor de Torneio / Floor",
-    modules: ["dashboard", "tournaments", "blinds", "tv-draw", "satellites", "ranking"],
+    modules: ["dashboard", "tournaments", "blinds", "tv-clock", "tv-draw", "satellites", "ranking"],
   },
   {
     id: "cashier",
@@ -172,6 +172,7 @@ export const ROLE_PRESETS: {
     id: "tv",
     label: "Operador TV",
     jobTitle: "Operador Clocker & TV",
-    modules: ["tv-draw", "blinds", "ranking"],
+    modules: ["tv-clock", "tv-draw", "blinds", "ranking"],
   },
 ];
+

@@ -1,4 +1,5 @@
-﻿import { useEffect, useState } from "react";
+﻿import { TvClockView } from "./TvClockView";
+import { useEffect, useState } from "react";
 import { Clock3, Grid2X2, Pause, Play, Sparkles, Trophy, UserMinus, UserPlus, X } from "lucide-react";
 import { useClub } from "@/context/ClubContext";
 import { brl, formatTime, LogoMark, StatusBadge } from "@/components/club/SharedUI";
@@ -343,3 +344,10 @@ function _Legacy_TvView({ mode }: { mode: "clock" | "draw" }) {
 export { TvDrawView as TvView } from "@/pages/views/TvDrawView";
 
 
+
+export function TvView({ mode = "draw" }: { mode?: "clock" | "draw" }) {
+  if (mode === "clock") {
+    return <TvClockView />;
+  }
+  return <TvDrawInner />;
+}
