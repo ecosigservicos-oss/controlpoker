@@ -1,4 +1,4 @@
-# Control Poker — Plano de implementação
+# PokerGestor — Plano de implementação
 
 ## Abordagem
 Construir uma SPA React/TypeScript dentro do starter React/Express/tRPC/Drizzle já inicializado, priorizando uma experiência de painel administrativo navegável e responsiva. A primeira entrega concentra os módulos mais visíveis e interligados: Visão Geral, Dashboard Analítico, Financeiro, Torneios, Cash Game, Ranking, Jackpot, Bar/Consumo, Membros e telas TV de Sorteios/Clocker.
@@ -16,7 +16,7 @@ Os dados demonstrativos serão modelados em estado local rico, com seed data rea
 - **Tipografia:** Inter como base; números em peso 700/800; títulos curtos e objetivos.
 - **Essência da marca:** o cockpit operacional que transforma a complexidade do clube de poker em decisões claras. Personalidade: preciso, confiável, conectado.
 - **Voz:** direta, segura e orientada à ação. Exemplos: “Tudo conectado. Nada perdido.” e “Feche o dia sabendo exatamente o que aconteceu.”
-- **Wordmark:** “CP” geométrico em duas cartas sobrepostas, seguido de CONTROL POKER em caixa alta com espaçamento técnico.
+- **Wordmark:** “CP” geométrico em duas cartas sobrepostas, seguido de POKER GESTOR em caixa alta com espaçamento técnico.
 - **Cor proprietária:** ciano Control `#00A8C6`.
 
 ## Estrutura

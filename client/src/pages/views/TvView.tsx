@@ -1,4 +1,5 @@
-﻿import { TvClockView } from "./TvClockView";
+import { TvDrawView } from "./TvDrawView";
+import { TvClockView } from "./TvClockView";
 import { useEffect, useState } from "react";
 import { Clock3, Grid2X2, Pause, Play, Sparkles, Trophy, UserMinus, UserPlus, X } from "lucide-react";
 import { useClub } from "@/context/ClubContext";
@@ -62,7 +63,7 @@ function _Legacy_TvView({ mode }: { mode: "clock" | "draw" }) {
           </div>
         </div>
         <div className="tv-footer-hint">
-          <span>CONTROL POKER</span>
+          <span>POKER GESTOR</span>
           <span>Gestão de clubes · Modo TV</span>
         </div>
       </div>
@@ -250,7 +251,7 @@ function _Legacy_TvView({ mode }: { mode: "clock" | "draw" }) {
         </div>
 
         <div className="tv-footer-hint">
-          <span>CONTROL POKER · CLOCKER</span>
+          <span>POKER GESTOR · CLOCKER</span>
           <span>Use Play/Pause para controlar o tempo dos blinds</span>
         </div>
       </div>
@@ -334,7 +335,7 @@ function _Legacy_TvView({ mode }: { mode: "clock" | "draw" }) {
       </div>
 
       <div className="tv-footer-hint">
-        <span>CONTROL POKER · MODO TV</span>
+        <span>POKER GESTOR · MODO TV</span>
         <span>Sorteio aleatório oficial de posições</span>
       </div>
     </div>
@@ -346,7 +347,8 @@ export function TvView({ mode = "draw" }: { mode?: "clock" | "draw" }) {
   if (mode === "clock") {
     return <TvClockView />;
   }
-  return <TvDrawInner />;
+  return <TvDrawView />;
 }
+
 
 

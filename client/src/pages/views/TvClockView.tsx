@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -254,7 +254,7 @@ export function TvClockView() {
                   color: "#FFFFFF",
                 }}
               >
-                CONTROL POKER
+                POKER GESTOR
               </div>
               <div
                 style={{
@@ -783,7 +783,7 @@ export function TvClockView() {
           textTransform: "uppercase",
         }}
       >
-        <span>CONTROL POKER · CLOCKER TV</span>
+        <span>POKER GESTOR · CLOCKER TV</span>
         <span>
           NÍVEL {levelIndex + 1} DE {blindLevels.length}
         </span>

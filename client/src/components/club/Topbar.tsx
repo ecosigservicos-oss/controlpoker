@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bell, CalendarDays, ChevronDown, Menu, Search } from "lucide-react";
 import { useClub } from "@/context/ClubContext";
 import type { ViewKey } from "@/types/club";
@@ -43,7 +43,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
         <Menu size={18} />
       </button>
       <div className="breadcrumb">
-        <span>Control Poker</span>
+        <span>PokerGestor</span>
         <span>/</span>
         <strong>{titleMap[view]}</strong>
       </div>

@@ -1,4 +1,4 @@
-# Control Poker — Entregas
+# PokerGestor — Entregas
 
 ## 1. Shell administrativo e navegação
 - [x] Sidebar marinho com logo, busca rápida ALT + S, seletor de unidade/usuário e seções PRINCIPAL, ÁREAS, FINANCEIRO e OPERAÇÃO.

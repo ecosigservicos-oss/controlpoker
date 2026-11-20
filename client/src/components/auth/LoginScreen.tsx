@@ -1,4 +1,4 @@
-﻿import { useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Eye, EyeOff, KeyRound, Lock, ShieldCheck, Spade, User } from "lucide-react";
 import { DEFAULT_ADMIN_USER, useAuth } from "@/context/AuthContext";
 
@@ -81,7 +81,7 @@ export function LoginScreen() {
                 color: "#FFFFFF",
               }}
             >
-              CONTROL POKER
+              POKER GESTOR
             </div>
             <div
               style={{

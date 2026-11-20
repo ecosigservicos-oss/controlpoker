@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Eraser,
   LayoutGrid,
@@ -251,7 +251,7 @@ export function TvDrawView() {
                   color: "#FFFFFF",
                 }}
               >
-                CONTROL POKER
+                POKER GESTOR
               </div>
               <div
                 style={{
@@ -868,7 +868,7 @@ export function TvDrawView() {
           textTransform: "uppercase",
         }}
       >
-        <span>CONTROL POKER · MODO TV</span>
+        <span>POKER GESTOR · MODO TV</span>
         <span>
           {activeTableCount} {activeTableCount === 1 ? "MESA ATIVA" : "MESAS ATIVAS"} ·{" "}
           {activeTableCount * seatsPerTable} ASSENTOS TOTAIS
