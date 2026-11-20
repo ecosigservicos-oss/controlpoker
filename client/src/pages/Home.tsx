@@ -142,6 +142,17 @@ type ActivityItem = {
 
 type TournamentStatus = "Agendado" | "Em andamento" | "Finalizado";
 
+type EntryType = "Buy-in" | "Rebuy" | "Add-on";
+
+type TournamentRegistration = {
+  id: string;
+  playerName: string;
+  entryType: EntryType;
+  value: number;
+  payment: string;
+  time: string;
+};
+
 type BlindLevel = {
   level: number;
   sb: number;
@@ -161,6 +172,7 @@ type Tournament = {
   status: TournamentStatus;
   entries: number;
   capacity: number;
+  registrations?: TournamentRegistration[];
 };
 
 const DEFAULT_BLIND_LEVELS: BlindLevel[] = [
@@ -183,6 +195,30 @@ const cashChartData: { day: string; entrada: number; saida: number }[] = [];
 const initialTransactions: Transaction[] = [];
 const initialActivities: ActivityItem[] = [];
 const players: string[][] = [];
+
+function getTournamentTotals(tournament: Tournament) {
+  const regs = tournament.registrations ?? [];
+  if (regs.length === 0) {
+    return {
+      registrations: regs,
+      buyInsCount: tournament.entries,
+      rebuysCount: 0,
+      addonsCount: 0,
+      collectedTotal: tournament.buyIn * tournament.entries,
+    };
+  }
+  const buyInsCount = regs.filter(r => r.entryType === "Buy-in").length;
+  const rebuysCount = regs.filter(r => r.entryType === "Rebuy").length;
+  const addonsCount = regs.filter(r => r.entryType === "Add-on").length;
+  const collectedTotal = regs.reduce((sum, r) => sum + r.value, 0);
+  return {
+    registrations: regs,
+    buyInsCount,
+    rebuysCount,
+    addonsCount,
+    collectedTotal,
+  };
+}
 
 function LogoMark({ compact = false }: { compact?: boolean }) {
   return (
@@ -239,7 +275,7 @@ function Topbar({ view, onNotify, onMenu }: { view: ViewKey; onNotify: () => voi
 }
 
 function OverviewView({ setView, activities, tournaments }: { setView: (view: ViewKey) => void; activities: ActivityItem[]; tournaments: Tournament[] }) {
-  const totalEntries = tournaments.reduce((sum, item) => sum + item.entries, 0);
+  const totalEntries = tournaments.reduce((sum, item) => sum + getTournamentTotals(item).buyInsCount, 0);
   const totalCapacity = tournaments.reduce((sum, item) => sum + item.capacity, 0);
   const progress = totalCapacity > 0 ? Math.min(100, Math.round((totalEntries / totalCapacity) * 100)) : 0;
 
@@ -302,7 +338,10 @@ function TournamentsView({
   initialTab?: "resumo" | "blinds" | "premiacao";
 }) {
   const [modalOpen, setModalOpen] = useState(false);
+  const [entryModalOpen, setEntryModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"resumo" | "blinds" | "premiacao">(initialTab);
+
+  // Formulário de criação de torneio
   const [name, setName] = useState("");
   const [date, setDate] = useState("20/11/2026");
   const [time, setTime] = useState("20:00");
@@ -313,6 +352,12 @@ function TournamentsView({
   const [capacity, setCapacity] = useState("80");
   const [status, setStatus] = useState<TournamentStatus>("Agendado");
 
+  // Formulário de lançamento (Buy-in / Rebuy / Add-on)
+  const [playerName, setPlayerName] = useState("");
+  const [entryType, setEntryType] = useState<EntryType>("Buy-in");
+  const [entryValue, setEntryValue] = useState("");
+  const [entryPayment, setEntryPayment] = useState("PIX");
+
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
@@ -322,6 +367,18 @@ function TournamentsView({
 
   const statusTone = (st: TournamentStatus) =>
     st === "Em andamento" ? "green" : st === "Agendado" ? "cyan" : "neutral";
+
+  const entryTypeTone = (type: EntryType) =>
+    type === "Buy-in" ? "cyan" : type === "Rebuy" ? "orange" : "gold";
+
+  const handleOpenEntryModal = () => {
+    if (!selectedTournament) return;
+    setPlayerName("");
+    setEntryType("Buy-in");
+    setEntryValue(selectedTournament.buyIn.toFixed(2).replace(".", ","));
+    setEntryPayment("PIX");
+    setEntryModalOpen(true);
+  };
 
   const handleCreateTournament = (event: FormEvent) => {
     event.preventDefault();
@@ -340,6 +397,7 @@ function TournamentsView({
       status,
       entries: 0,
       capacity: Math.max(9, Number(capacity) || 80),
+      registrations: [],
     };
 
     setTournaments(current => [created, ...current]);
@@ -360,22 +418,72 @@ function TournamentsView({
     setModalOpen(false);
   };
 
-  const handleRegisterEntry = (id: string) => {
+  const handleSubmitEntry = (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedTournament) return;
+    const trimmedPlayer = playerName.trim();
+    if (!trimmedPlayer) return;
+
+    const parsedValue = parseBrlInput(entryValue);
+    const now = new Date();
+    const formattedTime = `${String(now.getHours()).padStart(2, "0")}:${String(
+      now.getMinutes()
+    ).padStart(2, "0")}`;
+
+    const newReg: TournamentRegistration = {
+      id: `reg-${Date.now()}`,
+      playerName: trimmedPlayer,
+      entryType,
+      value: parsedValue,
+      payment: entryPayment,
+      time: formattedTime,
+    };
+
     setTournaments(current =>
-      current.map(item =>
-        item.id === id ? { ...item, entries: item.entries + 1 } : item
-      )
+      current.map(item => {
+        if (item.id !== selectedTournament.id) return item;
+        const currentRegs = item.registrations ?? [];
+        const nextRegs = [newReg, ...currentRegs];
+        const nextBuyIns = nextRegs.filter(r => r.entryType === "Buy-in").length;
+        return {
+          ...item,
+          entries: nextBuyIns > 0 ? nextBuyIns : item.entries,
+          registrations: nextRegs,
+        };
+      })
     );
-    setToast("Nova inscrição registrada no torneio!");
+
+    setActivities(current => [
+      {
+        id: `act-${Date.now()}`,
+        title: `${entryType} de ${trimmedPlayer} (${brl(parsedValue)})`,
+        detail: `${selectedTournament.name} · ${entryPayment}`,
+        time: "agora",
+        tone: entryType === "Buy-in" ? "cyan" : entryType === "Rebuy" ? "green" : "gold",
+        icon: Users,
+      },
+      ...current,
+    ]);
+
+    setToast(`${entryType} registrado para ${trimmedPlayer}!`);
+    setPlayerName("");
+    setEntryModalOpen(false);
   };
 
-  const handleRemoveEntry = (id: string) => {
+  const handleDeleteRegistration = (tournamentId: string, regId: string) => {
     setTournaments(current =>
-      current.map(item =>
-        item.id === id ? { ...item, entries: Math.max(0, item.entries - 1) } : item
-      )
+      current.map(item => {
+        if (item.id !== tournamentId) return item;
+        const nextRegs = (item.registrations ?? []).filter(r => r.id !== regId);
+        const nextBuyIns = nextRegs.filter(r => r.entryType === "Buy-in").length;
+        return {
+          ...item,
+          entries: nextBuyIns,
+          registrations: nextRegs,
+        };
+      })
     );
-    setToast("1 inscrição removida.");
+    setToast("Lançamento removido.");
   };
 
   const handleToggleStatus = (id: string) => {
@@ -400,9 +508,8 @@ function TournamentsView({
     setToast("Torneio removido.");
   };
 
-  const collectedTotal = selectedTournament
-    ? selectedTournament.buyIn * selectedTournament.entries
-    : 0;
+  const totals = selectedTournament ? getTournamentTotals(selectedTournament) : null;
+  const collectedTotal = totals?.collectedTotal ?? 0;
   const effectivePrizePool = selectedTournament
     ? Math.max(selectedTournament.guaranteed, collectedTotal)
     : 0;
@@ -434,7 +541,8 @@ function TournamentsView({
         <div className="tournament-layout">
           <div className="tournament-list">
             {tournaments.map(item => {
-              const pct = Math.min(100, Math.round((item.entries / item.capacity) * 100));
+              const itemTotals = getTournamentTotals(item);
+              const pct = Math.min(100, Math.round((itemTotals.buyInsCount / item.capacity) * 100));
               const isSelected = selectedTournament?.id === item.id;
               return (
                 <button
@@ -449,7 +557,7 @@ function TournamentsView({
                   </div>
                   <h3>{item.name}</h3>
                   <div className="tournament-meta">
-                    <span><Users size={12} /> {item.entries}/{item.capacity} inscritos</span>
+                    <span><Users size={12} /> {itemTotals.buyInsCount}/{item.capacity} inscritos</span>
                     <span><Clock3 size={12} /> Blinds {item.blindMinutes}m</span>
                   </div>
                   <div className="mini-progress">
@@ -464,7 +572,7 @@ function TournamentsView({
             })}
           </div>
 
-          {selectedTournament && (
+          {selectedTournament && totals && (
             <section className="panel tournament-detail">
               <div className="detail-cover">
                 <div className="detail-kicker">
@@ -489,14 +597,16 @@ function TournamentsView({
                   </div>
                   <div>
                     <span>INSCRITOS</span>
-                    <strong>{selectedTournament.entries} / {selectedTournament.capacity}</strong>
-                    <small>Vagas ocupadas</small>
+                    <strong>{totals.buyInsCount} / {selectedTournament.capacity}</strong>
+                    <small>
+                      {totals.buyInsCount} buy-ins · {totals.rebuysCount} rebuys · {totals.addonsCount} add-ons
+                    </small>
                   </div>
                 </div>
               </div>
 
               <div className="detail-actions">
-                <Button className="primary-button" onClick={() => handleRegisterEntry(selectedTournament.id)}>
+                <Button className="primary-button" onClick={handleOpenEntryModal}>
                   <Plus size={14} /> Registrar entrada
                 </Button>
                 <Button variant="outline" onClick={() => handleToggleStatus(selectedTournament.id)}>
@@ -522,7 +632,7 @@ function TournamentsView({
                   className={activeTab === "resumo" ? "tab-active" : ""}
                   onClick={() => setActiveTab("resumo")}
                 >
-                  Resumo da operação
+                  Resumo da operação ({totals.registrations.length})
                 </span>
                 <span
                   role="button"
@@ -547,33 +657,54 @@ function TournamentsView({
               {activeTab === "resumo" && (
                 <div className="detail-feed">
                   <div>
-                    <div className="feed-icon"><Users size={15} /></div>
-                    <p>
-                      <strong>{selectedTournament.entries} inscrições confirmadas de {selectedTournament.capacity} vagas</strong>
-                      <small>Arrecadação atual: {brl(collectedTotal)} · Clique em &quot;+ Registrar entrada&quot; para adicionar jogadores</small>
-                    </p>
-                    {selectedTournament.entries > 0 && (
-                      <Button type="button" variant="outline" onClick={() => handleRemoveEntry(selectedTournament.id)}>
-                        -1 entrada
-                      </Button>
-                    )}
-                  </div>
-                  <div>
                     <div className="feed-icon"><Trophy size={15} /></div>
                     <p>
                       <strong>Premiação total estimada em {brl(effectivePrizePool)}</strong>
-                      <small>Garantido: {brl(selectedTournament.guaranteed)} · Arrecadado: {brl(collectedTotal)}</small>
+                      <small>
+                        Garantido: {brl(selectedTournament.guaranteed)} · Arrecadado: {brl(collectedTotal)} ({totals.buyInsCount} Buy-ins, {totals.rebuysCount} Rebuys, {totals.addonsCount} Add-ons)
+                      </small>
                     </p>
                     <time>{selectedTournament.date}</time>
                   </div>
-                  <div>
-                    <div className="feed-icon feed-icon-gold"><Clock3 size={15} /></div>
-                    <p>
-                      <strong>Estrutura de {selectedTournament.blindMinutes} minutos por nível</strong>
-                      <small>Stack inicial de {selectedTournament.stack} fichas por inscrição</small>
-                    </p>
-                    <time>{selectedTournament.time}</time>
-                  </div>
+
+                  {totals.registrations.length === 0 ? (
+                    <div>
+                      <div className="feed-icon"><Users size={15} /></div>
+                      <p>
+                        <strong>Nenhuma entrada lançada individualmente ainda</strong>
+                        <small>Clique em &quot;+ Registrar entrada&quot; para lançar o nome do jogador e escolher Buy-in, Rebuy ou Add-on.</small>
+                      </p>
+                      <time>{selectedTournament.time}</time>
+                    </div>
+                  ) : (
+                    totals.registrations.map(reg => (
+                      <div key={reg.id}>
+                        <div className="feed-icon">
+                          <Users size={15} />
+                        </div>
+                        <p>
+                          <strong>
+                            {reg.playerName}{" "}
+                            <StatusBadge tone={entryTypeTone(reg.entryType)} dot={false}>
+                              {reg.entryType}
+                            </StatusBadge>
+                          </strong>
+                          <small>
+                            Valor: {brl(reg.value)} · Pagamento: {reg.payment}
+                          </small>
+                        </p>
+                        <time>{reg.time}</time>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          title="Remover lançamento"
+                          onClick={() => handleDeleteRegistration(selectedTournament.id, reg.id)}
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
 
@@ -622,6 +753,103 @@ function TournamentsView({
               )}
             </section>
           )}
+        </div>
+      )}
+
+      {entryModalOpen && selectedTournament && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setEntryModalOpen(false);
+          }}
+        >
+          <form className="modal-card" onSubmit={handleSubmitEntry}>
+            <div className="modal-heading">
+              <div>
+                <div className="eyebrow">{selectedTournament.name}</div>
+                <h2>Registrar entrada</h2>
+                <p>Informe o nome do jogador e o tipo de lançamento.</p>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setEntryModalOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <label>
+              Nome do jogador
+              <input
+                value={playerName}
+                onChange={event => setPlayerName(event.target.value)}
+                placeholder="Ex.: Carlos Mendes"
+                autoFocus
+                required
+              />
+            </label>
+
+            <div>
+              <span className="eyebrow" style={{ display: "block", marginBottom: 8 }}>
+                Tipo de lançamento
+              </span>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+                {(["Buy-in", "Rebuy", "Add-on"] as EntryType[]).map(option => {
+                  const selected = entryType === option;
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => setEntryType(option)}
+                      style={{
+                        padding: "10px 12px",
+                        borderRadius: 10,
+                        border: selected ? "2px solid #00A8C6" : "1px solid #D8E1EB",
+                        background: selected ? "#00A8C614" : "#FFFFFF",
+                        color: selected ? "#071E36" : "#4A596D",
+                        fontWeight: selected ? 700 : 500,
+                        cursor: "pointer",
+                        textAlign: "center",
+                      }}
+                    >
+                      {option}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="form-grid">
+              <label>
+                Valor (R$)
+                <input
+                  value={entryValue}
+                  onChange={event => setEntryValue(event.target.value)}
+                  placeholder="30,00"
+                  inputMode="decimal"
+                  required
+                />
+              </label>
+              <label>
+                Forma de pagamento
+                <select
+                  value={entryPayment}
+                  onChange={event => setEntryPayment(event.target.value)}
+                >
+                  <option value="PIX">PIX</option>
+                  <option value="Dinheiro">Dinheiro</option>
+                  <option value="Cartão">Cartão</option>
+                  <option value="Conta do Clube">Conta do Clube</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="modal-actions">
+              <Button type="button" variant="outline" onClick={() => setEntryModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" className="primary-button">
+                Confirmar {entryType}
+              </Button>
+            </div>
+          </form>
         </div>
       )}
 
@@ -834,12 +1062,14 @@ function TvView({ mode, setView, tournament }: { mode: "clock" | "draw"; setView
     );
   }
 
+  const totals = getTournamentTotals(tournament);
+
   if (mode === "clock") {
     const currentLevel = DEFAULT_BLIND_LEVELS[levelIndex] ?? DEFAULT_BLIND_LEVELS[0];
     const nextLevel = DEFAULT_BLIND_LEVELS[levelIndex + 1] ?? null;
-    const prizePool = Math.max(tournament.guaranteed, tournament.buyIn * tournament.entries);
+    const prizePool = Math.max(tournament.guaranteed, totals.collectedTotal);
     const numericStack = Number(tournament.stack.replace(/\D/g, "")) || 10000;
-    const avgStack = tournament.entries > 0 ? numericStack.toLocaleString("pt-BR") : tournament.stack;
+    const avgStack = totals.buyInsCount > 0 ? numericStack.toLocaleString("pt-BR") : tournament.stack;
 
     return (
       <div className="tv-screen">
@@ -863,7 +1093,7 @@ function TvView({ mode, setView, tournament }: { mode: "clock" | "draw"; setView
           <div className="clock-side">
             <div className="tv-stat-block">
               <span>INSCRITOS</span>
-              <strong>{tournament.entries} <small>/ {tournament.capacity}</small></strong>
+              <strong>{totals.buyInsCount} <small>/ {tournament.capacity}</small></strong>
             </div>
             <div className="tv-stat-block">
               <span>STACK MÉDIO</span>
@@ -909,7 +1139,7 @@ function TvView({ mode, setView, tournament }: { mode: "clock" | "draw"; setView
           <div className="clock-footer">
             <div><span>ENTRADA</span><strong>{brl(tournament.buyIn)}</strong></div>
             <div><span>STACK INICIAL</span><strong>{tournament.stack}</strong></div>
-            <div><span>ARRECADADO</span><strong>{brl(tournament.buyIn * tournament.entries)}</strong></div>
+            <div><span>ARRECADADO</span><strong>{brl(totals.collectedTotal)}</strong></div>
             <div className="clock-controls">
               <button
                 type="button"
@@ -952,8 +1182,13 @@ function TvView({ mode, setView, tournament }: { mode: "clock" | "draw"; setView
   }
 
   const handleDrawSeats = () => {
-    const count = Math.min(8, Math.max(2, tournament.entries || 8));
-    const labels = Array.from({ length: count }, (_, idx) => `Jogador #${idx + 1}`);
+    const buyInPlayers = totals.registrations
+      .filter(r => r.entryType === "Buy-in")
+      .map(r => r.playerName);
+    const count = Math.min(8, Math.max(2, buyInPlayers.length || totals.buyInsCount || 8));
+    const labels = Array.from({ length: count }, (_, idx) =>
+      buyInPlayers[idx] ? buyInPlayers[idx] : `Jogador #${idx + 1}`
+    );
     for (let i = labels.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [labels[i], labels[j]] = [labels[j], labels[i]];
@@ -984,7 +1219,7 @@ function TvView({ mode, setView, tournament }: { mode: "clock" | "draw"; setView
       <div className="draw-layout">
         <div className="draw-heading">
           <h1>Sorteio de Assentos</h1>
-          <p>{tournament.name} · {tournament.entries} inscritos confirmados</p>
+          <p>{tournament.name} · {totals.buyInsCount} inscritos confirmados</p>
         </div>
 
         <div className="poker-table-large">
