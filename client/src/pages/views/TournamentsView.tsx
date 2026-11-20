@@ -1,5 +1,6 @@
-﻿import { useState, type FormEvent } from "react";
+﻿import { useMemo, useState, type FormEvent } from "react";
 import {
+  Check,
   Clock3,
   Crown,
   MonitorPlay,
@@ -9,6 +10,7 @@ import {
   Sparkles,
   Trophy,
   Tv2,
+  UserCheck,
   Users,
   X,
 } from "lucide-react";
@@ -35,6 +37,8 @@ export function TournamentsView() {
     setSelectedTournamentId,
     blindLevels,
     rules,
+    savedPlayers,
+    registerSavedPlayer,
   } = useClub();
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -55,9 +59,47 @@ export function TournamentsView() {
   const [entryType, setEntryType] = useState<EntryType>("Buy-in");
   const [entryValue, setEntryValue] = useState("");
   const [entryPayment, setEntryPayment] = useState("PIX");
+  const [manualNameMode, setManualNameMode] = useState(false);
 
   const selectedTournament =
     tournaments.find(item => item.id === selectedTournamentId) ?? tournaments[0] ?? null;
+
+  const buyInPlayers = useMemo(() => {
+    if (!selectedTournament) return [];
+    const seen = new Set<string>();
+    const list: string[] = [];
+    const chronological = [...(selectedTournament.registrations ?? [])].reverse();
+    for (const reg of chronological) {
+      if (reg.entryType === "Buy-in") {
+        const clean = reg.playerName.trim();
+        const key = clean.toLowerCase();
+        if (clean && !seen.has(key)) {
+          seen.add(key);
+          list.push(clean);
+        }
+      }
+    }
+    return list;
+  }, [selectedTournament]);
+
+  const playerExtraCounts = useMemo(() => {
+    const map = new Map<string, { rebuys: number; addons: number }>();
+    if (!selectedTournament) return map;
+    for (const reg of selectedTournament.registrations ?? []) {
+      const key = reg.playerName.trim().toLowerCase();
+      if (!key) continue;
+      const current = map.get(key) ?? { rebuys: 0, addons: 0 };
+      if (reg.entryType === "Rebuy") current.rebuys += 1;
+      if (reg.entryType === "Add-on") current.addons += 1;
+      map.set(key, current);
+    }
+    return map;
+  }, [selectedTournament]);
+
+  const availableClubPlayers = useMemo(() => {
+    const inTournament = new Set(buyInPlayers.map(p => p.toLowerCase()));
+    return savedPlayers.filter(p => !inTournament.has(p.toLowerCase()));
+  }, [savedPlayers, buyInPlayers]);
 
   const statusTone = (st: TournamentStatus) =>
     st === "Em andamento" ? "green" : st === "Agendado" ? "cyan" : "neutral";
@@ -81,6 +123,7 @@ export function TournamentsView() {
     if (!selectedTournament) return;
     setPlayerName("");
     setEntryType("Buy-in");
+    setManualNameMode(false);
     const defaultVal = getDefaultValueForEntry("Buy-in", selectedTournament);
     setEntryValue(defaultVal.toFixed(2).replace(".", ","));
     setEntryPayment("PIX");
@@ -89,9 +132,18 @@ export function TournamentsView() {
 
   const handleSelectEntryType = (option: EntryType) => {
     setEntryType(option);
+    setManualNameMode(false);
     if (selectedTournament) {
       const val = getDefaultValueForEntry(option, selectedTournament);
       setEntryValue(val.toFixed(2).replace(".", ","));
+    }
+    if (option === "Rebuy" || option === "Add-on") {
+      const matchesBuyIn = buyInPlayers.some(
+        p => p.toLowerCase() === playerName.trim().toLowerCase()
+      );
+      if (!matchesBuyIn) {
+        setPlayerName("");
+      }
     }
   };
 
@@ -155,6 +207,8 @@ export function TournamentsView() {
       payment: entryPayment,
       time: formattedTime,
     };
+
+    registerSavedPlayer(trimmedPlayer);
 
     setTournaments(current =>
       current.map(item => {
@@ -225,9 +279,12 @@ export function TournamentsView() {
     setToast("Torneio removido.");
   };
 
-  const totals = selectedTournament ? getTournamentTotals(selectedTournament) : null;
+  const totals = selectedTournament ? getTournamentTotals(selectedTournament, rules) : null;
   const collectedTotal = totals?.collectedTotal ?? 0;
   const effectivePrizePool = selectedTournament ? Math.max(selectedTournament.guaranteed, collectedTotal) : 0;
+
+  const isExtraEntry = entryType === "Rebuy" || entryType === "Add-on";
+  const showBuyInSelectorList = isExtraEntry && buyInPlayers.length > 0 && !manualNameMode;
 
   return (
     <>
@@ -256,7 +313,7 @@ export function TournamentsView() {
         <div className="tournament-layout">
           <div className="tournament-list">
             {tournaments.map(item => {
-              const itemTotals = getTournamentTotals(item);
+              const itemTotals = getTournamentTotals(item, rules);
               const pct = Math.min(100, Math.round((itemTotals.buyInsCount / item.capacity) * 100));
               const isSelected = selectedTournament?.id === item.id;
               return (
@@ -523,17 +580,6 @@ export function TournamentsView() {
               </button>
             </div>
 
-            <label>
-              Nome do jogador
-              <input
-                value={playerName}
-                onChange={event => setPlayerName(event.target.value)}
-                placeholder="Ex.: Carlos Mendes"
-                autoFocus
-                required
-              />
-            </label>
-
             <div>
               <span className="eyebrow" style={{ display: "block", marginBottom: 8 }}>
                 Tipo de lançamento
@@ -565,6 +611,212 @@ export function TournamentsView() {
                 })}
               </div>
             </div>
+
+            {showBuyInSelectorList ? (
+              <div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 6,
+                  }}
+                >
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#0F172A" }}>
+                    Jogadores com Buy-in ({buyInPlayers.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualNameMode(true);
+                      setPlayerName("");
+                    }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#00A8C6",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Digitar outro nome
+                  </button>
+                </div>
+
+                <select
+                  value={playerName}
+                  onChange={event => setPlayerName(event.target.value)}
+                  required
+                  style={{ marginBottom: 10 }}
+                >
+                  <option value="">-- Selecione o jogador que fez o Buy-in --</option>
+                  {buyInPlayers.map(pName => {
+                    const stats = playerExtraCounts.get(pName.toLowerCase());
+                    const extras: string[] = [];
+                    if (stats?.rebuys) extras.push(`${stats.rebuys} rebuy${stats.rebuys > 1 ? "s" : ""}`);
+                    if (stats?.addons) extras.push(`${stats.addons} add-on`);
+                    return (
+                      <option key={pName} value={pName}>
+                        {pName} {extras.length ? `(${extras.join(", ")})` : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 6,
+                    maxHeight: 132,
+                    overflowY: "auto",
+                    padding: 8,
+                    borderRadius: 10,
+                    background: "#F8FAFC",
+                    border: "1px solid #E2E8F0",
+                  }}
+                >
+                  {buyInPlayers.map(pName => {
+                    const isPicked = playerName.trim().toLowerCase() === pName.toLowerCase();
+                    const stats = playerExtraCounts.get(pName.toLowerCase());
+                    const badgeCount =
+                      entryType === "Rebuy" ? stats?.rebuys ?? 0 : stats?.addons ?? 0;
+
+                    return (
+                      <button
+                        key={pName}
+                        type="button"
+                        onClick={() => setPlayerName(pName)}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "6px 10px",
+                          borderRadius: 999,
+                          border: isPicked ? "1.5px solid #00A8C6" : "1px solid #CBD5E1",
+                          background: isPicked ? "#00A8C6" : "#FFFFFF",
+                          color: isPicked ? "#FFFFFF" : "#0F172A",
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {isPicked ? <Check size={13} /> : <UserCheck size={13} />}
+                        <span>{pName}</span>
+                        {badgeCount > 0 && (
+                          <span
+                            style={{
+                              fontSize: 10.5,
+                              padding: "1px 6px",
+                              borderRadius: 999,
+                              background: isPicked ? "rgba(255,255,255,0.22)" : "#E2E8F0",
+                              color: isPicked ? "#FFFFFF" : "#475569",
+                            }}
+                          >
+                            {badgeCount}x
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div>
+                {isExtraEntry && buyInPlayers.length === 0 && (
+                  <div
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      background: "#FFFBEB",
+                      border: "1px solid #FDE68A",
+                      color: "#92400E",
+                      fontSize: 12,
+                      marginBottom: 8,
+                    }}
+                  >
+                    Nenhum Buy-in com nome registrado neste torneio ainda. Registre o Buy-in primeiro ou informe o nome abaixo.
+                  </div>
+                )}
+
+                {isExtraEntry && buyInPlayers.length > 0 && manualNameMode && (
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualNameMode(false);
+                        setPlayerName("");
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#00A8C6",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Voltar para lista do Buy-in ({buyInPlayers.length})
+                    </button>
+                  </div>
+                )}
+
+                <label>
+                  Nome do jogador
+                  <input
+                    list="saved-club-players"
+                    value={playerName}
+                    onChange={event => setPlayerName(event.target.value)}
+                    placeholder="Ex.: Carlos Mendes"
+                    autoFocus
+                    required
+                  />
+                </label>
+
+                <datalist id="saved-club-players">
+                  {savedPlayers.map(pName => (
+                    <option key={pName} value={pName} />
+                  ))}
+                </datalist>
+
+                {entryType === "Buy-in" && availableClubPlayers.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <span
+                      style={{
+                        display: "block",
+                        fontSize: 11.5,
+                        color: "#64748B",
+                        marginBottom: 6,
+                      }}
+                    >
+                      Jogadores salvos (clique para preencher):
+                    </span>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 88, overflowY: "auto" }}>
+                      {availableClubPlayers.map(pName => (
+                        <button
+                          key={pName}
+                          type="button"
+                          onClick={() => setPlayerName(pName)}
+                          style={{
+                            padding: "4px 10px",
+                            borderRadius: 999,
+                            border: "1px solid #CBD5E1",
+                            background: "#F8FAFC",
+                            color: "#334155",
+                            fontSize: 12,
+                            fontWeight: 500,
+                            cursor: "pointer",
+                          }}
+                        >
+                          + {pName}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="form-grid">
               <label>

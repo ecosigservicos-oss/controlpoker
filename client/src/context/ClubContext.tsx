@@ -13,6 +13,7 @@ import {
 const TOURNAMENTS_STORAGE_KEY = "controlpoker_tournaments_v1";
 const BLINDS_STORAGE_KEY = "controlpoker_blinds_v1";
 const RULES_STORAGE_KEY = "controlpoker_rules_v1";
+const PLAYERS_STORAGE_KEY = "controlpoker_players_v1";
 
 type ClubContextValue = {
   view: ViewKey;
@@ -26,6 +27,8 @@ type ClubContextValue = {
   setBlindLevels: React.Dispatch<React.SetStateAction<BlindLevel[]>>;
   rules: TournamentRulesConfig;
   setRules: React.Dispatch<React.SetStateAction<TournamentRulesConfig>>;
+  savedPlayers: string[];
+  registerSavedPlayer: (name: string) => void;
   transactions: Transaction[];
   setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
   activities: ActivityItem[];
@@ -35,6 +38,21 @@ type ClubContextValue = {
 };
 
 const ClubContext = createContext<ClubContextValue | null>(null);
+
+function mergeUniqueNames(existing: string[], incoming: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of [...existing, ...incoming]) {
+    const clean = raw.trim();
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(clean);
+    }
+  }
+  return result;
+}
 
 export function ClubProvider({ children }: { children: ReactNode }) {
   const [view, setView] = useState<ViewKey>("overview");
@@ -78,11 +96,36 @@ export function ClubProvider({ children }: { children: ReactNode }) {
     }
   });
 
+  const [savedPlayers, setSavedPlayers] = useState<string[]>(() => {
+    try {
+      const storedPlayers = JSON.parse(localStorage.getItem(PLAYERS_STORAGE_KEY) || "[]") as string[];
+      const storedTournaments = JSON.parse(localStorage.getItem(TOURNAMENTS_STORAGE_KEY) || "[]") as Tournament[];
+      const fromTournaments = storedTournaments.flatMap(t =>
+        (t.registrations ?? []).map(r => r.playerName)
+      );
+      return mergeUniqueNames(storedPlayers, fromTournaments);
+    } catch {
+      return [];
+    }
+  });
+
+  const registerSavedPlayer = (name: string) => {
+    const clean = name.trim();
+    if (!clean) return;
+    setSavedPlayers(current => mergeUniqueNames(current, [clean]));
+  };
+
   useEffect(() => {
     try {
       localStorage.setItem(TOURNAMENTS_STORAGE_KEY, JSON.stringify(tournaments));
     } catch {}
   }, [tournaments]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PLAYERS_STORAGE_KEY, JSON.stringify(savedPlayers));
+    } catch {}
+  }, [savedPlayers]);
 
   useEffect(() => {
     try {
@@ -119,6 +162,8 @@ export function ClubProvider({ children }: { children: ReactNode }) {
         setBlindLevels,
         rules,
         setRules,
+        savedPlayers,
+        registerSavedPlayer,
         transactions,
         setTransactions,
         activities,
