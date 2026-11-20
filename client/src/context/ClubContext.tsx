@@ -154,7 +154,17 @@ useEffect(() => {
     }, 150);
     return () => window.clearTimeout(timer);
   }, [view, transactions, activities, selectedTournamentId, toast, blindLevels, rules, tournaments, savedPlayers]);
-  // Sincronizacao instantanea em memoria sem sobrescrever o Supabase na montagem inicial
+useEffect(() => {
+    if (!didMountSyncRef.current) {
+      didMountSyncRef.current = true;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void pushStateToSupabase({ view, transactions, activities, selectedTournamentId, toast, blindLevels, rules, tournaments, savedPlayers });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [view, transactions, activities, selectedTournamentId, toast, blindLevels, rules, tournaments, savedPlayers]);
+  // Sincroniza APENAS dados do clube em tempo real (mantem cada tela/rota independente)
   const didMountSyncRef = useRef(false);
 
   useEffect(() => {
@@ -164,10 +174,8 @@ useEffect(() => {
       const detail = (ev as CustomEvent<{ liveContext?: Record<string, unknown> }>).detail;
       const live = detail?.liveContext;
       if (!live || typeof live !== "object") return;
-      if ("view" in live && live["view"] !== undefined) { setView(prev => (JSON.stringify(prev) === JSON.stringify(live["view"]) ? prev : (live["view"] as never))); }
       if ("transactions" in live && live["transactions"] !== undefined) { setTransactions(prev => (JSON.stringify(prev) === JSON.stringify(live["transactions"]) ? prev : (live["transactions"] as never))); }
       if ("activities" in live && live["activities"] !== undefined) { setActivities(prev => (JSON.stringify(prev) === JSON.stringify(live["activities"]) ? prev : (live["activities"] as never))); }
-      if ("selectedTournamentId" in live && live["selectedTournamentId"] !== undefined) { setSelectedTournamentId(prev => (JSON.stringify(prev) === JSON.stringify(live["selectedTournamentId"]) ? prev : (live["selectedTournamentId"] as never))); }
       if ("toast" in live && live["toast"] !== undefined) { setToast(prev => (JSON.stringify(prev) === JSON.stringify(live["toast"]) ? prev : (live["toast"] as never))); }
       if ("blindLevels" in live && live["blindLevels"] !== undefined) { setBlindLevels(prev => (JSON.stringify(prev) === JSON.stringify(live["blindLevels"]) ? prev : (live["blindLevels"] as never))); }
       if ("rules" in live && live["rules"] !== undefined) { setRules(prev => (JSON.stringify(prev) === JSON.stringify(live["rules"]) ? prev : (live["rules"] as never))); }
@@ -187,10 +195,11 @@ useEffect(() => {
       return;
     }
     const timer = window.setTimeout(() => {
-      void pushStateToSupabase({ view, transactions, activities, selectedTournamentId, toast, blindLevels, rules, tournaments, savedPlayers });
+      void pushStateToSupabase({ transactions, activities, toast, blindLevels, rules, tournaments, savedPlayers });
     }, 150);
     return () => window.clearTimeout(timer);
-  }, [view, transactions, activities, selectedTournamentId, toast, blindLevels, rules, tournaments, savedPlayers]);
+  }, [transactions, activities, toast, blindLevels, rules, tournaments, savedPlayers]);
+
 
 
 return (

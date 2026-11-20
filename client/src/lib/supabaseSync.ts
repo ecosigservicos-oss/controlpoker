@@ -24,12 +24,18 @@ function buildHeaders(extra?: Record<string, string>): Record<string, string> {
   return headers;
 }
 
+function isUiNavigationKey(key: string): boolean {
+  return /(?:active_?view|current_?view|active_?page|current_?page|active_?tab|current_?tab|active_?screen|current_?screen|route|sidebar|selected_?tournament|selected_?player|tv_?mode|clock_?mode)/i.test(
+    key
+  );
+}
+
 function collectLocalStateSnapshot(): Record<string, unknown> {
   const snapshot: Record<string, unknown> = {};
   try {
     for (let i = 0; i < window.localStorage.length; i++) {
       const key = window.localStorage.key(i);
-      if (!key || key === SYNC_META_KEY || key.startsWith("__")) continue;
+      if (!key || key === SYNC_META_KEY || key.startsWith("__") || isUiNavigationKey(key)) continue;
       const raw = window.localStorage.getItem(key);
       if (raw !== null) {
         try {
@@ -230,7 +236,7 @@ function applySnapshotEverywhere(
   isApplyingRemote = true;
   try {
     for (const [k, v] of Object.entries(remoteState)) {
-      if (k === "__liveContext" || k === "__primaryState" || k === SYNC_META_KEY) continue;
+      if (k === "__liveContext" || k === "__primaryState" || k === SYNC_META_KEY || isUiNavigationKey(k)) continue;
       const serialized = typeof v === "string" ? v : JSON.stringify(v);
       if (window.localStorage.getItem(k) !== serialized) {
         window.localStorage.setItem(k, serialized);
