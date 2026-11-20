@@ -37,6 +37,8 @@ const PAYOUT_PRESETS: { label: string; percentages: number[] }[] = [
   { label: "Top 5 (40/25/17/10/8)", percentages: [40, 25, 17, 10, 8] },
 ];
 
+const BLIND_TIME_PRESETS = [10, 12, 15, 20, 25, 30];
+
 function getDefaultPlaceLabel(place: number): string {
   if (place === 1) return "1º Lugar (Campeão)";
   if (place === 2) return "2º Lugar (Vice-campeão)";
@@ -54,6 +56,7 @@ export function TournamentsView() {
     setSelectedTournamentId,
     blindLevels,
     rules,
+    setRules,
     savedPlayers,
     registerSavedPlayer,
   } = useClub();
@@ -61,6 +64,7 @@ export function TournamentsView() {
   const [modalOpen, setModalOpen] = useState(false);
   const [entryModalOpen, setEntryModalOpen] = useState(false);
   const [payoutModalOpen, setPayoutModalOpen] = useState(false);
+  const [blindTimeModalOpen, setBlindTimeModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"resumo" | "blinds" | "premiacao">("resumo");
 
   const [name, setName] = useState("");
@@ -69,7 +73,7 @@ export function TournamentsView() {
   const [buyIn, setBuyIn] = useState(rules.buyInValue.toFixed(2).replace(".", ","));
   const [guaranteed, setGuaranteed] = useState("0,00");
   const [stack, setStack] = useState(rules.buyInChips);
-  const [blindMinutes, setBlindMinutes] = useState("15");
+  const [blindMinutes, setBlindMinutes] = useState(String(rules.blindMinutes ?? 15));
   const [capacity, setCapacity] = useState("30");
   const [status, setStatus] = useState<TournamentStatus>("Agendado");
 
@@ -81,6 +85,7 @@ export function TournamentsView() {
 
   const [draftPayouts, setDraftPayouts] = useState<PayoutTier[]>(DEFAULT_PAYOUT_TIERS);
   const [draftGuaranteed, setDraftGuaranteed] = useState("0,00");
+  const [draftTournamentBlindMinutes, setDraftTournamentBlindMinutes] = useState("15");
 
   const selectedTournament =
     tournaments.find(item => item.id === selectedTournamentId) ?? tournaments[0] ?? null;
@@ -160,6 +165,27 @@ export function TournamentsView() {
     setDraftPayouts(currentTiers);
     setDraftGuaranteed(selectedTournament.guaranteed.toFixed(2).replace(".", ","));
     setPayoutModalOpen(true);
+  };
+
+  const handleOpenBlindTimeModal = () => {
+    if (!selectedTournament) return;
+    setDraftTournamentBlindMinutes(String(selectedTournament.blindMinutes));
+    setBlindTimeModalOpen(true);
+  };
+
+  const handleSaveTournamentBlindTime = (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedTournament) return;
+    const parsedMinutes = Math.max(1, Math.min(180, Math.round(Number(draftTournamentBlindMinutes) || 15)));
+
+    setTournaments(current =>
+      current.map(item =>
+        item.id === selectedTournament.id ? { ...item, blindMinutes: parsedMinutes } : item
+      )
+    );
+    setRules(current => ({ ...current, blindMinutes: parsedMinutes }));
+    setToast(`Tempo dos blinds atualizado para ${parsedMinutes} min!`);
+    setBlindTimeModalOpen(false);
   };
 
   const handleApplyPayoutPreset = (percentages: number[]) => {
@@ -247,7 +273,7 @@ export function TournamentsView() {
       addonValue: rules.addonValue,
       guaranteed: parseBrlInput(guaranteed),
       stack: stack.trim() || rules.buyInChips,
-      blindMinutes: Math.max(5, Number(blindMinutes) || 15),
+      blindMinutes: Math.max(1, Number(blindMinutes) || rules.blindMinutes || 15),
       status,
       entries: 0,
       capacity: Math.max(9, Number(capacity) || 30),
@@ -389,7 +415,10 @@ export function TournamentsView() {
         eyebrow="Operação de eventos"
         title="Torneios"
         description="Acompanhe inscrições, premiações e andamento dos eventos."
-        action={() => setModalOpen(true)}
+        action={() => {
+          setBlindMinutes(String(rules.blindMinutes ?? 15));
+          setModalOpen(true);
+        }}
         actionLabel="Novo torneio"
       />
 
@@ -601,21 +630,63 @@ export function TournamentsView() {
               )}
 
               {activeTab === "blinds" && (
-                <div className="detail-feed">
-                  {blindLevels.map(lvl => (
-                    <div key={lvl.level}>
-                      <div className="feed-icon">
-                        <Clock3 size={15} />
-                      </div>
-                      <p>
-                        <strong>
-                          Nível {lvl.level}: {lvl.sb} / {lvl.bb}
-                        </strong>
-                        <small>Duração: {selectedTournament.blindMinutes} min</small>
-                      </p>
-                      <time>{(lvl.level - 1) * selectedTournament.blindMinutes} min</time>
+                <div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      padding: "12px 14px",
+                      marginBottom: 10,
+                      borderRadius: 10,
+                      background: "#F8FAFC",
+                      border: "1px solid #E2E8F0",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div>
+                      <span
+                        style={{
+                          display: "block",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: "#64748B",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.05em",
+                        }}
+                      >
+                        Duração por Nível
+                      </span>
+                      <strong style={{ fontSize: 16, color: "#0F172A" }}>
+                        {selectedTournament.blindMinutes} minutos
+                      </strong>{" "}
+                      <small style={{ color: "#64748B", fontSize: 12 }}>
+                        ({blindLevels.length} níveis cadastrados)
+                      </small>
                     </div>
-                  ))}
+
+                    <Button type="button" variant="outline" onClick={handleOpenBlindTimeModal}>
+                      <Pencil size={14} /> Editar time dos blinds
+                    </Button>
+                  </div>
+
+                  <div className="detail-feed">
+                    {blindLevels.map(lvl => (
+                      <div key={lvl.level}>
+                        <div className="feed-icon">
+                          <Clock3 size={15} />
+                        </div>
+                        <p>
+                          <strong>
+                            Nível {lvl.level}: {lvl.sb} / {lvl.bb}
+                          </strong>
+                          <small>Duração: {selectedTournament.blindMinutes} min</small>
+                        </p>
+                        <time>{(lvl.level - 1) * selectedTournament.blindMinutes} min</time>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -693,6 +764,79 @@ export function TournamentsView() {
               )}
             </section>
           )}
+        </div>
+      )}
+
+      {blindTimeModalOpen && selectedTournament && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setBlindTimeModalOpen(false);
+          }}
+        >
+          <form className="modal-card" onSubmit={handleSaveTournamentBlindTime} style={{ maxWidth: 420 }}>
+            <div className="modal-heading">
+              <div>
+                <div className="eyebrow">{selectedTournament.name}</div>
+                <h2>Editar tempo dos blinds</h2>
+                <p>Altere a duração de cada nível deste torneio e do Clocker.</p>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setBlindTimeModalOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div>
+              <span className="eyebrow" style={{ display: "block", marginBottom: 8 }}>
+                Tempos rápidos
+              </span>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+                {BLIND_TIME_PRESETS.map(mins => {
+                  const selected = Number(draftTournamentBlindMinutes) === mins;
+                  return (
+                    <button
+                      key={mins}
+                      type="button"
+                      onClick={() => setDraftTournamentBlindMinutes(String(mins))}
+                      style={{
+                        padding: "9px 8px",
+                        borderRadius: 10,
+                        border: selected ? "2px solid #00A8C6" : "1px solid #D8E1EB",
+                        background: selected ? "#00A8C614" : "#FFFFFF",
+                        color: selected ? "#071E36" : "#4A596D",
+                        fontWeight: selected ? 700 : 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {mins} min
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <label>
+              Duração por nível (minutos)
+              <input
+                type="number"
+                min={1}
+                max={180}
+                value={draftTournamentBlindMinutes}
+                onChange={event => setDraftTournamentBlindMinutes(event.target.value)}
+                autoFocus
+                required
+              />
+            </label>
+
+            <div className="modal-actions">
+              <Button type="button" variant="outline" onClick={() => setBlindTimeModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" className="primary-button">
+                Salvar tempo ({Math.max(1, Number(draftTournamentBlindMinutes) || 15)} min)
+              </Button>
+            </div>
+          </form>
         </div>
       )}
 
@@ -1291,8 +1435,8 @@ export function TournamentsView() {
                 Blinds (minutos)
                 <input
                   type="number"
-                  min={5}
-                  max={120}
+                  min={1}
+                  max={180}
                   value={blindMinutes}
                   onChange={event => setBlindMinutes(event.target.value)}
                   required

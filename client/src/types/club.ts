@@ -73,6 +73,7 @@ export type TournamentRulesConfig = {
   addonValue: number;
   addonChips: string;
   addonBbNote: string;
+  blindMinutes?: number;
 };
 
 export type Tournament = {
@@ -132,6 +133,7 @@ export const DEFAULT_TOURNAMENT_RULES: TournamentRulesConfig = {
   addonValue: 40,
   addonChips: "20.000",
   addonBbNote: "33,33bb",
+  blindMinutes: 15,
 };
 
 export function parseChipsNumber(raw?: string, fallback = 0): number {
