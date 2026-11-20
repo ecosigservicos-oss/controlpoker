@@ -33,7 +33,7 @@ import { getTournamentTotals, type Transaction } from "@/types/club";
 
 const cashChartData: { day: string; entrada: number; saida: number }[] = [];
 
-export function FinanceView() {
+function _Legacy_FinanceView() {
   const { transactions, setTransactions, setActivities, tournaments } = useClub();
   const [grouping, setGrouping] = useState("Mensal");
   const [modalOpen, setModalOpen] = useState(false);
@@ -275,3 +275,6 @@ export function FinanceView() {
     </>
   );
 }
+
+export { FinanceiroView as FinanceView } from "@/pages/views/FinanceiroView";
+
