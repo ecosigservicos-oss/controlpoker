@@ -22,21 +22,26 @@ interface BlindLevelItem {
 }
 
 const DEFAULT_BLIND_LEVELS: BlindLevelItem[] = [
-  { level: 1, smallBlind: 25, bigBlind: 50, ante: 0, durationMinutes: 15 },
-  { level: 2, smallBlind: 50, bigBlind: 100, ante: 0, durationMinutes: 15 },
-  { level: 3, smallBlind: 75, bigBlind: 150, ante: 25, durationMinutes: 15 },
-  { level: 4, smallBlind: 100, bigBlind: 200, ante: 25, durationMinutes: 15 },
-  { level: 5, smallBlind: 150, bigBlind: 300, ante: 50, durationMinutes: 15 },
-  { level: 6, smallBlind: 200, bigBlind: 400, ante: 50, durationMinutes: 15 },
-  { level: 7, smallBlind: 0, bigBlind: 0, ante: 0, durationMinutes: 10, isBreak: true },
-  { level: 8, smallBlind: 300, bigBlind: 600, ante: 75, durationMinutes: 15 },
-  { level: 9, smallBlind: 400, bigBlind: 800, ante: 100, durationMinutes: 15 },
-  { level: 10, smallBlind: 500, bigBlind: 1000, ante: 100, durationMinutes: 15 },
-  { level: 11, smallBlind: 600, bigBlind: 1200, ante: 200, durationMinutes: 15 },
-  { level: 12, smallBlind: 800, bigBlind: 1600, ante: 200, durationMinutes: 15 },
-  { level: 13, smallBlind: 1000, bigBlind: 2000, ante: 300, durationMinutes: 15 },
-  { level: 14, smallBlind: 1500, bigBlind: 3000, ante: 400, durationMinutes: 15 },
-  { level: 15, smallBlind: 2000, bigBlind: 4000, ante: 500, durationMinutes: 15 },
+  { level: 1, smallBlind: 50, bigBlind: 100, ante: 0, durationMinutes: 15 },
+  { level: 2, smallBlind: 100, bigBlind: 150, ante: 0, durationMinutes: 15 },
+  { level: 3, smallBlind: 150, bigBlind: 200, ante: 0, durationMinutes: 15 },
+  { level: 4, smallBlind: 200, bigBlind: 250, ante: 0, durationMinutes: 15 },
+  { level: 5, smallBlind: 250, bigBlind: 300, ante: 0, durationMinutes: 15 },
+  { level: 6, smallBlind: 300, bigBlind: 400, ante: 0, durationMinutes: 15 },
+  { level: 7, smallBlind: 400, bigBlind: 500, ante: 0, durationMinutes: 15 },
+  { level: 8, smallBlind: 500, bigBlind: 600, ante: 0, durationMinutes: 15 },
+  { level: 9, smallBlind: 600, bigBlind: 700, ante: 0, durationMinutes: 15 },
+  { level: 10, smallBlind: 700, bigBlind: 800, ante: 0, durationMinutes: 15 },
+  { level: 11, smallBlind: 800, bigBlind: 900, ante: 0, durationMinutes: 15 },
+  { level: 12, smallBlind: 900, bigBlind: 1000, ante: 0, durationMinutes: 15 },
+  { level: 13, smallBlind: 1000, bigBlind: 1100, ante: 0, durationMinutes: 15 },
+  { level: 14, smallBlind: 1100, bigBlind: 1200, ante: 0, durationMinutes: 15 },
+  { level: 15, smallBlind: 1200, bigBlind: 1300, ante: 0, durationMinutes: 15 },
+  { level: 16, smallBlind: 1300, bigBlind: 1400, ante: 0, durationMinutes: 15 },
+  { level: 17, smallBlind: 1400, bigBlind: 1500, ante: 0, durationMinutes: 15 },
+  { level: 18, smallBlind: 1500, bigBlind: 1600, ante: 0, durationMinutes: 15 },
+  { level: 19, smallBlind: 1600, bigBlind: 1700, ante: 0, durationMinutes: 15 },
+  { level: 20, smallBlind: 1700, bigBlind: 1800, ante: 0, durationMinutes: 15 },
 ];
 
 function formatNumber(n: number): string {
@@ -89,7 +94,7 @@ export function TvClockView() {
   const selectedTournament =
     tournaments.find(t => String(t.id) === selectedTournamentId) ?? tournaments[0] ?? null;
 
-  const blindLevels = useMemo<BlindLevelItem[]>(() => {
+  const { blindLevels, matchedStructure } = useMemo(() => {
     const structures = (Array.isArray(club.blindStructures) ? club.blindStructures : []) as Array<
       Record<string, unknown>
     >;
@@ -97,21 +102,77 @@ export function TvClockView() {
     const matched =
       structures.find(s => String(s.id) === structureId) ?? structures[0] ?? null;
 
-    const rawLevels = Array.isArray(matched?.levels)
-      ? (matched.levels as Array<Record<string, unknown>>)
+    const tournamentLevels = Array.isArray(selectedTournament?.blindLevels)
+      ? (selectedTournament.blindLevels as Array<Record<string, unknown>>)
+      : Array.isArray(selectedTournament?.levels)
+      ? (selectedTournament.levels as Array<Record<string, unknown>>)
+      : Array.isArray(selectedTournament?.blinds)
+      ? (selectedTournament.blinds as Array<Record<string, unknown>>)
       : [];
 
-    if (rawLevels.length === 0) return DEFAULT_BLIND_LEVELS;
+    const clubDirectLevels = Array.isArray(club.blindLevels)
+      ? (club.blindLevels as Array<Record<string, unknown>>)
+      : Array.isArray(club.defaultBlindLevels)
+      ? (club.defaultBlindLevels as Array<Record<string, unknown>>)
+      : Array.isArray(club.blinds)
+      ? (club.blinds as Array<Record<string, unknown>>)
+      : [];
 
-    return rawLevels.map((lvl, idx) => ({
-      level: Number(lvl.level ?? idx + 1),
-      smallBlind: Number(lvl.smallBlind ?? lvl.sb ?? 0),
-      bigBlind: Number(lvl.bigBlind ?? lvl.bb ?? 0),
-      ante: Number(lvl.ante ?? 0),
-      durationMinutes: Math.max(1, Number(lvl.duration ?? lvl.minutes ?? 15)),
-      isBreak: Boolean(lvl.isBreak),
-    }));
-  }, [club.blindStructures, selectedTournament]);
+    const structureLevels = Array.isArray(matched?.levels)
+      ? (matched.levels as Array<Record<string, unknown>>)
+      : Array.isArray(matched?.blindLevels)
+      ? (matched.blindLevels as Array<Record<string, unknown>>)
+      : [];
+
+    const rawLevels =
+      tournamentLevels.length > 0
+        ? tournamentLevels
+        : clubDirectLevels.length > 0
+        ? clubDirectLevels
+        : structureLevels;
+
+    const globalDuration = Number(
+      selectedTournament?.levelDuration ??
+        selectedTournament?.blindDuration ??
+        selectedTournament?.durationMinutes ??
+        selectedTournament?.timePerLevel ??
+        matched?.levelDuration ??
+        matched?.duration ??
+        matched?.durationMinutes ??
+        club.levelDuration ??
+        club.blindDuration ??
+        0
+    );
+
+    if (rawLevels.length === 0) {
+      return {
+        matchedStructure: matched,
+        blindLevels: DEFAULT_BLIND_LEVELS.map(item => ({
+          ...item,
+          durationMinutes: globalDuration > 0 ? globalDuration : item.durationMinutes,
+        })),
+      };
+    }
+
+    const mapped = rawLevels.map((lvl, idx) => {
+      const lvlDur = Number(
+        lvl.durationMinutes ?? lvl.duration ?? lvl.minutes ?? lvl.time ?? 0
+      );
+      const resolvedDuration =
+        lvlDur > 0 ? lvlDur : globalDuration > 0 ? globalDuration : 15;
+
+      return {
+        level: Number(lvl.level ?? idx + 1),
+        smallBlind: Number(lvl.smallBlind ?? lvl.sb ?? lvl.small ?? 0),
+        bigBlind: Number(lvl.bigBlind ?? lvl.bb ?? lvl.big ?? 0),
+        ante: Number(lvl.ante ?? 0),
+        durationMinutes: Math.max(1, resolvedDuration),
+        isBreak: Boolean(lvl.isBreak),
+      };
+    });
+
+    return { matchedStructure: matched, blindLevels: mapped };
+  }, [club, selectedTournament]);
 
   const [levelIndex, setLevelIndex] = useState(0);
   const currentLevel = blindLevels[levelIndex] ?? blindLevels[0];
@@ -126,6 +187,12 @@ export function TvClockView() {
 
   const levelIndexRef = useRef(levelIndex);
   levelIndexRef.current = levelIndex;
+
+  useEffect(() => {
+    if (!isRunning) {
+      setSecondsLeft((currentLevel?.durationMinutes ?? 15) * 60);
+    }
+  }, [currentLevel?.durationMinutes, selectedTournament?.id, isRunning]);
 
   useEffect(() => {
     const clockInterval = window.setInterval(() => {
@@ -174,21 +241,74 @@ export function TvClockView() {
   const secondsStr = String(secondsLeft % 60).padStart(2, "0");
 
   const stats = useMemo(() => {
-    const entries = Number(selectedTournament?.entries ?? 0);
-    const rebuys = Number(selectedTournament?.rebuys ?? 0);
-    const addons = Number(selectedTournament?.addons ?? 0);
-    const buyIn = Number(selectedTournament?.buyIn ?? 0);
-    const rebuyVal = Number(selectedTournament?.rebuy ?? buyIn);
-    const addonVal = Number(selectedTournament?.addon ?? buyIn);
-    const startingStack = Number(
-      selectedTournament?.startingStack ?? selectedTournament?.stack ?? 10000
+    const regs = Array.isArray(selectedTournament?.registrations)
+      ? (selectedTournament.registrations as Array<Record<string, unknown>>)
+      : [];
+
+    const regEntries = regs.filter(r => {
+      const t = String(r.entryType ?? "Buy-in").toLowerCase();
+      return !t.includes("rebuy") && !t.includes("add");
+    }).length;
+    const regRebuys = regs.filter(r =>
+      String(r.entryType ?? "").toLowerCase().includes("rebuy")
+    ).length;
+    const regAddons = regs.filter(r =>
+      String(r.entryType ?? "").toLowerCase().includes("add")
+    ).length;
+
+    const entries = Math.max(Number(selectedTournament?.entries ?? 0), regEntries);
+    const rebuys = Math.max(Number(selectedTournament?.rebuys ?? 0), regRebuys);
+    const addons = Math.max(Number(selectedTournament?.addons ?? 0), regAddons);
+
+    const buyIn = Number(
+      selectedTournament?.buyIn ?? matchedStructure?.buyIn ?? club.defaultBuyIn ?? 30
+    );
+    const rebuyVal = Number(
+      selectedTournament?.rebuy ?? matchedStructure?.rebuy ?? club.defaultRebuy ?? buyIn
+    );
+    const addonVal = Number(
+      selectedTournament?.addon ?? matchedStructure?.addon ?? club.defaultAddon ?? buyIn
     );
 
-    const totalPrize =
-      Number(selectedTournament?.prizePool ?? 0) ||
-      entries * buyIn + rebuys * rebuyVal + addons * addonVal;
+    const rawStartStack = Number(
+      selectedTournament?.startingStack ??
+        selectedTournament?.startingChips ??
+        selectedTournament?.buyInChips ??
+        selectedTournament?.stack ??
+        matchedStructure?.startingStack ??
+        matchedStructure?.buyInChips ??
+        club.buyInChips ??
+        15000
+    );
+    const startingStack =
+      rawStartStack > 0 && rawStartStack < 100 ? rawStartStack * 1000 : rawStartStack;
 
-    const totalChips = (entries + rebuys + addons) * startingStack;
+    const rawRebuyChips = Number(
+      selectedTournament?.rebuyChips ??
+        selectedTournament?.rebuyStack ??
+        matchedStructure?.rebuyChips ??
+        club.rebuyChips ??
+        startingStack
+    );
+    const rebuyChips =
+      rawRebuyChips > 0 && rawRebuyChips < 100 ? rawRebuyChips * 1000 : rawRebuyChips;
+
+    const rawAddonChips = Number(
+      selectedTournament?.addonChips ??
+        selectedTournament?.addonStack ??
+        matchedStructure?.addonChips ??
+        club.addonChips ??
+        20000
+    );
+    const addonChips =
+      rawAddonChips > 0 && rawAddonChips < 100 ? rawAddonChips * 1000 : rawAddonChips;
+
+    const computedPrize = entries * buyIn + rebuys * rebuyVal + addons * addonVal;
+    const totalPrize =
+      computedPrize > 0 ? computedPrize : Number(selectedTournament?.prizePool ?? 0);
+
+    const totalChips =
+      entries * startingStack + rebuys * rebuyChips + addons * addonChips;
     const activePlayers = Math.max(1, entries);
     const avgStack = entries > 0 ? Math.round(totalChips / activePlayers) : startingStack;
 
@@ -199,7 +319,7 @@ export function TvClockView() {
       totalPrize,
       avgStack,
     };
-  }, [selectedTournament]);
+  }, [selectedTournament, matchedStructure, club]);
 
   const totalDurationSec = Math.max(1, (currentLevel?.durationMinutes ?? 15) * 60);
   const progressPct = Math.max(0, Math.min(100, (secondsLeft / totalDurationSec) * 100));
