@@ -277,7 +277,7 @@ function _Legacy_TvView({ mode }: { mode: "clock" | "draw" }) {
   return (
     <div className="tv-screen">
       <div className="tv-topbar">
-        <button className="tv-brand" onClick={() => setView("tournaments")}>
+        <button className="tv-brand" onClick={() => setView("tv-draw")}>
           <LogoMark />
           <span className="tv-brand-separator" />
           <span className="tv-event-label">
@@ -341,4 +341,5 @@ function _Legacy_TvView({ mode }: { mode: "clock" | "draw" }) {
 }
 
 export { TvDrawView as TvView } from "@/pages/views/TvDrawView";
+
 
