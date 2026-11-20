@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
   Pause,
   Play,
+  RefreshCw,
   RotateCcw,
   Shuffle,
   Volume2,
@@ -43,6 +44,64 @@ const DEFAULT_BLIND_LEVELS: BlindLevelItem[] = [
   { level: 19, smallBlind: 1600, bigBlind: 1700, ante: 0, durationMinutes: 15 },
   { level: 20, smallBlind: 1700, bigBlind: 1800, ante: 0, durationMinutes: 15 },
 ];
+
+function isTournamentOpen(t: Record<string, unknown>): boolean {
+  if (typeof t.isOpen === "boolean") return t.isOpen;
+  const s = String(t.status ?? "").trim().toLowerCase();
+  if (!s) return true;
+  if (
+    s.includes("fechad") ||
+    s.includes("finaliz") ||
+    s.includes("encerr") ||
+    s.includes("closed") ||
+    s.includes("finished") ||
+    s.includes("cancel")
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function resolveDurationFromObj(obj: Record<string, unknown> | null | undefined): number {
+  if (!obj) return 0;
+  const candidateKeys = [
+    "levelDuration",
+    "blindDuration",
+    "durationMinutes",
+    "duration",
+    "timePerLevel",
+    "blindTime",
+    "levelTime",
+    "levelMinutes",
+    "blindMinutes",
+    "minutesPerLevel",
+    "durationMin",
+    "minutes",
+    "time",
+    "tempoNivel",
+    "duracaoNivel",
+  ];
+  for (const k of candidateKeys) {
+    const val = Number(obj[k]);
+    if (Number.isFinite(val) && val > 0) return val;
+  }
+  for (const [k, rawVal] of Object.entries(obj)) {
+    const lower = k.toLowerCase();
+    if (
+      (lower.includes("duration") ||
+        lower.includes("blindtime") ||
+        lower.includes("leveltime") ||
+        lower.includes("minutes") ||
+        lower.includes("tempo")) &&
+      !lower.includes("updated") &&
+      !lower.includes("created")
+    ) {
+      const val = Number(rawVal);
+      if (Number.isFinite(val) && val > 0 && val <= 240) return val;
+    }
+  }
+  return 0;
+}
 
 function formatNumber(n: number): string {
   return n.toLocaleString("pt-BR");
@@ -91,10 +150,26 @@ export function TvClockView() {
     | ((id: string) => void)
     | undefined;
 
-  const selectedTournament =
-    tournaments.find(t => String(t.id) === selectedTournamentId) ?? tournaments[0] ?? null;
+  const openTournaments = useMemo(
+    () => tournaments.filter(isTournamentOpen),
+    [tournaments]
+  );
 
-  const { blindLevels, matchedStructure } = useMemo(() => {
+  const [manualTournamentId, setManualTournamentId] = useState<string>("");
+  const [pullFeedback, setPullFeedback] = useState<string>("");
+
+  const activeTournamentId =
+    manualTournamentId ||
+    selectedTournamentId ||
+    String(openTournaments[0]?.id ?? tournaments[0]?.id ?? "");
+
+  const selectedTournament =
+    tournaments.find(t => String(t.id) === activeTournamentId) ??
+    openTournaments[0] ??
+    tournaments[0] ??
+    null;
+
+  const { blindLevels, matchedStructure, resolvedMinutes } = useMemo(() => {
     const structures = (Array.isArray(club.blindStructures) ? club.blindStructures : []) as Array<
       Record<string, unknown>
     >;
@@ -131,47 +206,49 @@ export function TvClockView() {
         ? clubDirectLevels
         : structureLevels;
 
-    const globalDuration = Number(
-      selectedTournament?.levelDuration ??
-        selectedTournament?.blindDuration ??
-        selectedTournament?.durationMinutes ??
-        selectedTournament?.timePerLevel ??
-        matched?.levelDuration ??
-        matched?.duration ??
-        matched?.durationMinutes ??
-        club.levelDuration ??
-        club.blindDuration ??
-        0
-    );
+    const tourneyDur = resolveDurationFromObj(selectedTournament);
+    const structDur = resolveDurationFromObj(matched);
+    const clubDur = resolveDurationFromObj(club);
+    const globalDuration = tourneyDur || structDur || clubDur;
 
     if (rawLevels.length === 0) {
+      const mins = globalDuration > 0 ? globalDuration : 15;
       return {
         matchedStructure: matched,
+        resolvedMinutes: mins,
         blindLevels: DEFAULT_BLIND_LEVELS.map(item => ({
           ...item,
-          durationMinutes: globalDuration > 0 ? globalDuration : item.durationMinutes,
+          durationMinutes: mins,
         })),
       };
     }
 
     const mapped = rawLevels.map((lvl, idx) => {
-      const lvlDur = Number(
-        lvl.durationMinutes ?? lvl.duration ?? lvl.minutes ?? lvl.time ?? 0
-      );
-      const resolvedDuration =
-        lvlDur > 0 ? lvlDur : globalDuration > 0 ? globalDuration : 15;
+      const lvlDur = resolveDurationFromObj(lvl);
+      const finalDur =
+        tourneyDur > 0
+          ? tourneyDur
+          : lvlDur > 0
+          ? lvlDur
+          : globalDuration > 0
+          ? globalDuration
+          : 15;
 
       return {
         level: Number(lvl.level ?? idx + 1),
         smallBlind: Number(lvl.smallBlind ?? lvl.sb ?? lvl.small ?? 0),
         bigBlind: Number(lvl.bigBlind ?? lvl.bb ?? lvl.big ?? 0),
         ante: Number(lvl.ante ?? 0),
-        durationMinutes: Math.max(1, resolvedDuration),
+        durationMinutes: Math.max(1, finalDur),
         isBreak: Boolean(lvl.isBreak),
       };
     });
 
-    return { matchedStructure: matched, blindLevels: mapped };
+    return {
+      matchedStructure: matched,
+      resolvedMinutes: mapped[0]?.durationMinutes ?? 15,
+      blindLevels: mapped,
+    };
   }, [club, selectedTournament]);
 
   const [levelIndex, setLevelIndex] = useState(0);
@@ -193,6 +270,42 @@ export function TvClockView() {
       setSecondsLeft((currentLevel?.durationMinutes ?? 15) * 60);
     }
   }, [currentLevel?.durationMinutes, selectedTournament?.id, isRunning]);
+
+  const handlePullOpenTournament = useCallback(
+    (targetId?: string) => {
+      const target =
+        (targetId && tournaments.find(t => String(t.id) === targetId)) ||
+        openTournaments[0] ||
+        tournaments[0] ||
+        null;
+
+      if (!target) {
+        setPullFeedback("Nenhum torneio aberto encontrado");
+        window.setTimeout(() => setPullFeedback(""), 3000);
+        return;
+      }
+
+      const idStr = String(target.id);
+      setManualTournamentId(idStr);
+      if (setSelectedTournamentId) {
+        setSelectedTournamentId(idStr);
+      }
+
+      const tDur =
+        resolveDurationFromObj(target) ||
+        resolveDurationFromObj(matchedStructure) ||
+        resolvedMinutes ||
+        15;
+
+      setIsRunning(false);
+      setLevelIndex(0);
+      setSecondsLeft(Math.max(1, tDur) * 60);
+
+      setPullFeedback(`Dados puxados: ${String(target.name ?? "Torneio")} (${tDur} min/nível)`);
+      window.setTimeout(() => setPullFeedback(""), 3500);
+    },
+    [tournaments, openTournaments, setSelectedTournamentId, matchedStructure, resolvedMinutes]
+  );
 
   useEffect(() => {
     const clockInterval = window.setInterval(() => {
@@ -421,28 +534,80 @@ export function TvClockView() {
             </div>
           </div>
 
-          {tournaments.length > 1 && setSelectedTournamentId && (
-            <select
-              value={String(selectedTournament?.id ?? "")}
-              onChange={e => setSelectedTournamentId(e.target.value)}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => handlePullOpenTournament()}
               style={{
-                height: 34,
-                padding: "0 10px",
-                borderRadius: 8,
-                border: "1px solid rgba(56, 189, 248, 0.3)",
-                background: "#081A2E",
-                color: "#E2E8F0",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                height: 36,
+                padding: "0 13px",
+                borderRadius: 10,
+                border: "1px solid rgba(16, 185, 129, 0.45)",
+                background: "rgba(16, 185, 129, 0.14)",
+                color: "#6EE7B7",
                 fontSize: 12.5,
-                fontWeight: 600,
+                fontWeight: 700,
+                cursor: "pointer",
               }}
             >
-              {tournaments.map(t => (
-                <option key={String(t.id)} value={String(t.id)}>
-                  {String(t.name)}
-                </option>
-              ))}
-            </select>
-          )}
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  background: "#10B981",
+                }}
+              />
+              <RefreshCw size={13} />
+              Puxar Torneio Aberto ({openTournaments.length})
+            </button>
+
+            {tournaments.length > 0 && (
+              <select
+                value={String(selectedTournament?.id ?? "")}
+                onChange={e => handlePullOpenTournament(e.target.value)}
+                aria-label="Selecionar torneio aberto"
+                style={{
+                  height: 36,
+                  padding: "0 10px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(56, 189, 248, 0.3)",
+                  background: "#081A2E",
+                  color: "#E2E8F0",
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                }}
+              >
+                {tournaments.map(t => {
+                  const openTag = isTournamentOpen(t) ? "🟢 Aberto" : "Fechado";
+                  return (
+                    <option key={String(t.id)} value={String(t.id)}>
+                      {String(t.name)} ({openTag})
+                    </option>
+                  );
+                })}
+              </select>
+            )}
+
+            {pullFeedback && (
+              <span
+                style={{
+                  padding: "5px 10px",
+                  borderRadius: 8,
+                  background: "rgba(16, 185, 129, 0.18)",
+                  border: "1px solid rgba(16, 185, 129, 0.4)",
+                  color: "#A7F3D0",
+                  fontSize: 11.5,
+                  fontWeight: 700,
+                }}
+              >
+                {pullFeedback}
+              </span>
+            )}
+          </div>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
