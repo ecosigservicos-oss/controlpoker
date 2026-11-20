@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from "react";
-import { Clock3, Grid2X2, Pause, Play, Sparkles, Trophy, X } from "lucide-react";
+import { Clock3, Grid2X2, Pause, Play, Sparkles, Trophy, UserMinus, UserPlus, X } from "lucide-react";
 import { useClub } from "@/context/ClubContext";
 import { brl, formatTime, LogoMark, StatusBadge } from "@/components/club/SharedUI";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { DEFAULT_BLIND_LEVELS, getTournamentTotals } from "@/types/club";
 
 export function TvView({ mode }: { mode: "clock" | "draw" }) {
-  const { setView, activeTournament: tournament, blindLevels } = useClub();
+  const { setView, activeTournament: tournament, setTournaments, blindLevels, rules } = useClub();
 
   const [levelIndex, setLevelIndex] = useState(0);
   const [secondsLeft, setSecondsLeft] = useState((tournament?.blindMinutes ?? 15) * 60);
@@ -68,14 +68,23 @@ export function TvView({ mode }: { mode: "clock" | "draw" }) {
     );
   }
 
-  const totals = getTournamentTotals(tournament);
+  const totals = getTournamentTotals(tournament, rules);
+
+  const handleAdjustEliminated = (delta: number) => {
+    setTournaments(current =>
+      current.map(item => {
+        if (item.id !== tournament.id) return item;
+        const maxEliminated = Math.max(0, totals.buyInsCount - 1);
+        const nextEliminated = Math.min(maxEliminated, Math.max(0, (item.eliminatedCount ?? 0) + delta));
+        return { ...item, eliminatedCount: nextEliminated };
+      })
+    );
+  };
 
   if (mode === "clock") {
     const currentLevel = levels[levelIndex] ?? levels[0];
     const nextLevel = levels[levelIndex + 1] ?? null;
     const prizePool = Math.max(tournament.guaranteed, totals.collectedTotal);
-    const numericStack = Number(tournament.stack.replace(/\D/g, "")) || 15000;
-    const avgStack = totals.buyInsCount > 0 ? numericStack.toLocaleString("pt-BR") : tournament.stack;
 
     return (
       <div className="tv-screen">
@@ -98,14 +107,58 @@ export function TvView({ mode }: { mode: "clock" | "draw" }) {
         <div className="clock-layout">
           <div className="clock-side">
             <div className="tv-stat-block">
-              <span>INSCRITOS</span>
+              <span>ATIVOS / INSCRITOS</span>
               <strong>
-                {totals.buyInsCount} <small>/ {tournament.capacity}</small>
+                {totals.activePlayers} <small>/ {totals.buyInsCount}</small>
               </strong>
+              {totals.buyInsCount > 1 && (
+                <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                  <button
+                    type="button"
+                    title="Registrar eliminação"
+                    onClick={() => handleAdjustEliminated(1)}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      padding: "4px 8px",
+                      borderRadius: 6,
+                      border: "1px solid rgba(255,255,255,0.16)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "#E2E8F0",
+                      fontSize: 11,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <UserMinus size={12} /> Eliminar
+                  </button>
+                  {(tournament.eliminatedCount ?? 0) > 0 && (
+                    <button
+                      type="button"
+                      title="Desfazer eliminação"
+                      onClick={() => handleAdjustEliminated(-1)}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        padding: "4px 8px",
+                        borderRadius: 6,
+                        border: "1px solid rgba(255,255,255,0.16)",
+                        background: "rgba(255,255,255,0.06)",
+                        color: "#E2E8F0",
+                        fontSize: 11,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <UserPlus size={12} /> +1
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
             <div className="tv-stat-block">
               <span>STACK MÉDIO</span>
-              <strong>{avgStack}</strong>
+              <strong>{totals.averageStack.toLocaleString("pt-BR")}</strong>
             </div>
           </div>
 
@@ -138,8 +191,8 @@ export function TvView({ mode }: { mode: "clock" | "draw" }) {
 
           <div className="clock-side right">
             <div className="tv-stat-block">
-              <span>GARANTIDO</span>
-              <strong>{brl(tournament.guaranteed)}</strong>
+              <span>FICHAS EM JOGO</span>
+              <strong>{totals.totalChipsInPlay.toLocaleString("pt-BR")}</strong>
             </div>
             <div className="tv-stat-block">
               <span>TEMPO NÍVEL</span>

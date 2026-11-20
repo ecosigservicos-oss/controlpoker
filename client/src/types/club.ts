@@ -82,6 +82,7 @@ export type Tournament = {
   blindMinutes: number;
   status: TournamentStatus;
   entries: number;
+  eliminatedCount?: number;
   capacity: number;
   registrations?: TournamentRegistration[];
 };
@@ -120,26 +121,67 @@ export const DEFAULT_TOURNAMENT_RULES: TournamentRulesConfig = {
   addonBbNote: "33,33bb",
 };
 
-export function getTournamentTotals(tournament: Tournament) {
+export function parseChipsNumber(raw?: string, fallback = 0): number {
+  if (!raw) return fallback;
+  const digits = Number(raw.replace(/\D/g, ""));
+  return Number.isFinite(digits) && digits > 0 ? digits : fallback;
+}
+
+export function getTournamentTotals(
+  tournament: Tournament,
+  rules: TournamentRulesConfig = DEFAULT_TOURNAMENT_RULES
+) {
   const regs = tournament.registrations ?? [];
+  const baseBuyInChips = parseChipsNumber(tournament.stack, parseChipsNumber(rules.buyInChips, 15000));
+  const defaultRebuyChips = parseChipsNumber(rules.rebuyChips, baseBuyInChips);
+  const defaultAddonChips = parseChipsNumber(rules.addonChips, 20000);
+
   if (regs.length === 0) {
+    const buyInsCount = tournament.entries;
+    const totalChipsInPlay = buyInsCount * baseBuyInChips;
+    const eliminated = Math.min(Math.max(0, buyInsCount - 1), tournament.eliminatedCount ?? 0);
+    const activePlayers = buyInsCount > 0 ? Math.max(1, buyInsCount - eliminated) : 0;
+    const averageStack = activePlayers > 0 ? Math.round(totalChipsInPlay / activePlayers) : baseBuyInChips;
+
     return {
       registrations: regs,
-      buyInsCount: tournament.entries,
+      buyInsCount,
       rebuysCount: 0,
       addonsCount: 0,
-      collectedTotal: tournament.buyIn * tournament.entries,
+      collectedTotal: tournament.buyIn * buyInsCount,
+      totalChipsInPlay,
+      activePlayers,
+      averageStack,
     };
   }
+
   const buyInsCount = regs.filter(r => r.entryType === "Buy-in").length;
   const rebuysCount = regs.filter(r => r.entryType === "Rebuy").length;
   const addonsCount = regs.filter(r => r.entryType === "Add-on").length;
   const collectedTotal = regs.reduce((sum, r) => sum + r.value, 0);
+
+  const totalChipsInPlay = regs.reduce((sum, r) => {
+    const fallback =
+      r.entryType === "Buy-in"
+        ? baseBuyInChips
+        : r.entryType === "Rebuy"
+        ? defaultRebuyChips
+        : defaultAddonChips;
+    return sum + parseChipsNumber(r.chips, fallback);
+  }, 0);
+
+  const eliminated = Math.min(Math.max(0, buyInsCount - 1), tournament.eliminatedCount ?? 0);
+  const activePlayers = buyInsCount > 0 ? Math.max(1, buyInsCount - eliminated) : 0;
+  const averageStack = activePlayers > 0 ? Math.round(totalChipsInPlay / activePlayers) : baseBuyInChips;
+
   return {
     registrations: regs,
     buyInsCount,
     rebuysCount,
     addonsCount,
     collectedTotal,
+    totalChipsInPlay,
+    activePlayers,
+    averageStack,
   };
 }
