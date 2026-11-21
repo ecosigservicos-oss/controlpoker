@@ -1,4 +1,4 @@
-﻿import type { LucideIcon } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 export type ViewKey =
   | "overview"
@@ -116,12 +116,22 @@ export const DEFAULT_BLIND_LEVELS: BlindLevel[] = [
   { level: 12, sb: 900, bb: 1000 },
   { level: 13, sb: 1000, bb: 1100 },
   { level: 14, sb: 1100, bb: 1200 },
-  { level: 15, sb: 1200, bb: 1300 },
-  { level: 16, sb: 1300, bb: 1400 },
-  { level: 17, sb: 1400, bb: 1500 },
-  { level: 18, sb: 1500, bb: 1600 },
-  { level: 19, sb: 1600, bb: 1700 },
-  { level: 20, sb: 1700, bb: 1800 },
+    { level: 15, sb: 1000, bb: 2000 },
+  { level: 16, sb: 1250, bb: 2500 },
+  { level: 17, sb: 1500, bb: 3000 },
+  { level: 18, sb: 1750, bb: 3500 },
+  { level: 19, sb: 2000, bb: 4000 },
+  { level: 20, sb: 2250, bb: 4500 },
+  { level: 21, sb: 2500, bb: 5000 },
+  { level: 22, sb: 2750, bb: 5500 },
+  { level: 23, sb: 3000, bb: 6000 },
+  { level: 24, sb: 3250, bb: 6500 },
+  { level: 25, sb: 3500, bb: 7000 },
+  { level: 26, sb: 3750, bb: 7500 },
+  { level: 27, sb: 4000, bb: 8000 },
+  { level: 28, sb: 4250, bb: 8500 },
+  { level: 29, sb: 4500, bb: 9000 },
+  { level: 30, sb: 4750, bb: 9500 },
 ];
 
 export const DEFAULT_TOURNAMENT_RULES: TournamentRulesConfig = {

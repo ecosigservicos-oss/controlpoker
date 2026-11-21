@@ -172,6 +172,44 @@ function collectLocalStateSnapshot(): Record<string, unknown> {
   return snapshot;
 }
 
+function upgradeTournamentBlinds15to30(obj: unknown): void {
+  if (!obj || typeof obj !== "object") return;
+  const root = obj as Record<string, unknown>;
+  const list = Array.isArray(root.tournaments) ? root.tournaments : [];
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const t = item as Record<string, unknown>;
+    const levels = Array.isArray(t.blindLevels)
+      ? t.blindLevels
+      : Array.isArray(t.levels)
+      ? t.levels
+      : null;
+    if (!levels || levels.length < 14) continue;
+    const first = levels[0] as Record<string, unknown>;
+    const sbKey = "smallBlind" in first ? "smallBlind" : "sb";
+    const bbKey = "bigBlind" in first ? "bigBlind" : "bb";
+    const kept = levels.slice(0, 14);
+    const added: Array<Record<string, unknown>> = [];
+    for (let i = 0; i <= 15; i++) {
+      const lvl = 15 + i;
+      const bb = 2000 + i * 500;
+      const sb = Math.floor(bb / 2);
+      const row: Record<string, unknown> = {
+        level: lvl,
+        [sbKey]: sb,
+        [bbKey]: bb,
+        duration: Number(first.duration ?? t.levelDuration ?? 15),
+      };
+      if ("ante" in first) row.ante = bb;
+      if ("bbAnte" in first) row.bbAnte = bb;
+      added.push(row);
+    }
+    const nextLevels = [...kept, ...added];
+    if (Array.isArray(t.blindLevels)) t.blindLevels = nextLevels;
+    if (Array.isArray(t.levels)) t.levels = nextLevels;
+  }
+}
+
 function findPrimaryStateObject(
   snapshot: Record<string, unknown>
 ): Record<string, unknown> | null {
@@ -407,7 +445,7 @@ function applySnapshotEverywhere(
       (remoteState.__primaryState as Record<string, unknown> | undefined) ??
       findPrimaryStateObject(remoteState);
 
-    const liveContext = rawLive ? sanitizeSyncValue(rawLive) : null;
+    const liveContext = rawLive ? sanitizeSyncValue(rawLive) : null; if (liveContext) upgradeTournamentBlinds15to30(liveContext);
     if (liveContext) {
       lastKnownLiveContext = liveContext;
     }
