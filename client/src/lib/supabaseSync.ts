@@ -12,7 +12,7 @@ const DEFAULT_CLUB_ID = "default-club";
 const SYNC_META_KEY = "pokergestor_supabase_last_sync_at";
 const SYNC_EVENT_NAME = "pokergestor:supabase-synced";
 const BROADCAST_CHANNEL_NAME = "pokergestor_instant_sync_v2";
-const SYNC_SCHEMA_VERSION = 2;
+const SYNC_SCHEMA_VERSION = 3;
 
 function buildHeaders(extra?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = {
@@ -121,6 +121,53 @@ function isUiNavigationKey(key: string): boolean {
   );
 }
 
+
+export function migrateAllBlindsDeep(node: unknown, depth = 0): boolean {
+  if (depth > 8 || !node || typeof node !== "object") return false;
+  let changed = false;
+
+  if (Array.isArray(node)) {
+    if (node.length >= 12 && node.length <= 29 && node[0] && typeof node[0] === "object") {
+      const first = node[0] as Record<string, unknown>;
+      const sbKey = "smallBlind" in first ? "smallBlind" : "sb" in first ? "sb" : null;
+      const bbKey = "bigBlind" in first ? "bigBlind" : "bb" in first ? "bb" : null;
+      if (sbKey && bbKey) {
+        const kept = node.slice(0, 14).map((item, idx) => {
+          const copy = { ...(item as Record<string, unknown>) };
+          if ("level" in copy) copy.level = idx + 1;
+          return copy;
+        });
+        const added = [];
+        for (let i = 0; i <= 15; i++) {
+          const lvl = 15 + i;
+          const bb = 2000 + i * 500;
+          const sb = Math.floor(bb / 2);
+          const row: Record<string, unknown> = { ...first };
+          if ("level" in row) row.level = lvl;
+          if ("id" in row) row.id = `lvl-${lvl}`;
+          row[sbKey] = sb;
+          row[bbKey] = bb;
+          if ("ante" in row) row.ante = bb;
+          if ("bbAnte" in row) row.bbAnte = bb;
+          added.push(row);
+        }
+        node.splice(0, node.length, ...kept, ...added);
+        return true;
+      }
+    }
+    for (const item of node) {
+      if (migrateAllBlindsDeep(item, depth + 1)) changed = true;
+    }
+    return changed;
+  }
+
+  const obj = node as Record<string, unknown>;
+  for (const val of Object.values(obj)) {
+    if (migrateAllBlindsDeep(val, depth + 1)) changed = true;
+  }
+  return changed;
+}
+
 export function purgeCorruptedLocalStorage(): void {
   if (typeof window === "undefined") return;
   try {
@@ -132,6 +179,7 @@ export function purgeCorruptedLocalStorage(): void {
       if (!raw || (!raw.startsWith("{") && !raw.startsWith("["))) continue;
       try {
         const parsed = JSON.parse(raw);
+        if (migrateAllBlindsDeep(parsed)) { window.localStorage.setItem(key, JSON.stringify(parsed)); }
         if (isInvalidReactObject(parsed)) {
           keysToRemove.push(key);
         }
@@ -415,6 +463,7 @@ function applySnapshotEverywhere(
     return;
   }
   const remoteState = sanitizeSyncValue(rawRemoteState);
+  migrateAllBlindsDeep(remoteState);
   isApplyingRemote = true;
   suppressPushUntil = Date.now() + 1000;
   try {

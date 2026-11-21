@@ -1,4 +1,4 @@
-import { initSupabaseRealtimeSync, isInvalidReactObject, pushStateToSupabase, sanitizeSyncValue } from "@/lib/supabaseSync";
+import { migrateAllBlindsDeep, initSupabaseRealtimeSync, isInvalidReactObject, pushStateToSupabase, sanitizeSyncValue } from "@/lib/supabaseSync";
 import { useRef, createContext, useContext, useEffect, useState, type ReactNode  } from "react";
 import {
   DEFAULT_BLIND_LEVELS,
@@ -227,6 +227,7 @@ useEffect(() => {
     const handleRemoteState = (ev: Event) => {
       const detail = (ev as CustomEvent<{ liveContext?: Record<string, unknown> }>).detail;
       const live = detail?.liveContext;
+      if (live) migrateAllBlindsDeep(live);
       if (!live || typeof live !== "object") return;
       suppressRemoteEchoUntilRef.current = Date.now() + 1000;
       if ("transactions" in live && live["transactions"] !== undefined) { setTransactions(prev => applySafeRemoteValue(prev, live["transactions"])); }
